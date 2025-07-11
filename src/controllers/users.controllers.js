@@ -1339,7 +1339,7 @@ export const generarPdfAfectacion = async (req, res) => {
               margin: [0, 0, 0, 15]
             },
 
-        // Víctimas
+        // Víctim
         { text: 'Víctimas', style: 'subheader', margin: [0, 10, 0, 4] },
         victimasResult.rows.length === 0
           ? { text: 'No hay víctimas registradas.', italics: true, margin: [0, 0, 0, 10] }
