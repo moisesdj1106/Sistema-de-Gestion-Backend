@@ -1,7 +1,10 @@
-export const PORT = process.env.PORT || 4000;
-export const DB_USER = "avnadmin"
-export const DB_HOST = "pg-d4aa2ff-moises-2025.e.aivencloud.com"
-export const DB_PASSWORD = "AVNS_3_XpC_SinHbYL5fxa4u"
-export const DB_DATABASE = "defaultdb"
-export const DB_PORT = 24279 
+// config.js
+import dotenv from 'dotenv';
+dotenv.config();
 
+export const DB_DATABASE = process.env.DB_DATABASE;
+export const DB_HOST = process.env.DB_HOST;
+export const DB_PASSWORD = process.env.DB_PASSWORD;
+export const DB_PORT = process.env.DB_PORT;
+export const DB_USER = process.env.DB_USER;
+export const PORT = process.env.PORT || 4001;
