@@ -1004,7 +1004,7 @@ export const solicitarRecuperacion = async (req, res) => {
         const enlace = `https://sistema-de-gestion-desastres.netlify.app/restablecer/${token}`;
 
         await transporter.sendMail({
-            from: '"Soporte" <moises.becerra07@gmail.com>',
+            from: '"Soporte Liceo" <moises.becerra07@gmail.com>',
             to: email,
             subject: "Recuperación de acceso",
             html: `<p>Hola tu nombre de usuario es: ${usuario.TMA_USUARI || ''},</p>
