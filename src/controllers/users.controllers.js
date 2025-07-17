@@ -1001,7 +1001,7 @@ export const solicitarRecuperacion = async (req, res) => {
             [token, expiracion, email]
         );
 
-        const enlace = `https://sistema-de-gestion-backend.onrender.com/restablecer/${token}`;
+        const enlace = `https://sistema-de-gestion-desastres.netlify.app/restablecer/${token}`;
 
         await transporter.sendMail({
             from: '"Soporte" <moises.becerra07@gmail.com>',
