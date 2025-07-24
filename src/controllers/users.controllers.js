@@ -1002,7 +1002,7 @@ export const solicitarRecuperacion = async (req, res) => {
         );
 
         // El enlace ya NO lleva el token
-        const enlace = `https://sistema-de-gestion-desastres.netlify.app/restablecer`;
+        const enlace = `https://sistema-de-gestion-desastres.netlify.app/RestablecerContrasena`;
 
         await transporter.sendMail({
             from: '"Soporte Liceo" <moises.becerra07@gmail.com>',
