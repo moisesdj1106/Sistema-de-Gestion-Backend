@@ -1001,7 +1001,8 @@ export const solicitarRecuperacion = async (req, res) => {
             [token, expiracion, email]
         );
 
-        const enlace = `https://sistema-de-gestion-desastres.netlify.app/restablecer/${token}`;
+        // El enlace ya NO lleva el token
+        const enlace = `https://sistema-de-gestion-desastres.netlify.app/restablecer`;
 
         await transporter.sendMail({
             from: '"Soporte Liceo" <moises.becerra07@gmail.com>',
@@ -1020,23 +1021,28 @@ export const solicitarRecuperacion = async (req, res) => {
     }
 };
 
-// Restablecer contraseña
+// Restablecer contraseña (ahora recibe email y token)
 export const restablecerContrasena = async (req, res) => {
-    const { token } = req.params;
-    const { nuevaContrasena } = req.body;
+    const { email, nuevaContrasena } = req.body;
     try {
+        // Busca el usuario por correo y verifica que el token no haya expirado
         const result = await pool.query(
-            'SELECT * FROM "BDTMA_USUA" WHERE "TMA_RESETO" = $1 AND "TMA_RESETP" > NOW()',
-            [token]
+            'SELECT * FROM "BDTMA_USUA" WHERE "TMA_CORREO" = $1 AND "TMA_RESETP" > NOW()',
+            [email]
         );
         if (result.rows.length === 0) {
             return res.status(400).json({ mensaje: "Token inválido o expirado" });
         }
+        const usuario = result.rows[0];
+        const token = usuario.TMA_RESETO;
+
+        // Si quieres, puedes pedir el token como campo oculto en el frontend y verificarlo aquí
+
         const hash = await bcrypt.hash(nuevaContrasena, 10);
 
         await pool.query(
-            'UPDATE "BDTMA_USUA" SET "TMA_CONTRA" = $1, "TMA_RESETO" = NULL, "TMA_RESETP" = NULL WHERE "TMA_RESETO" = $2',
-            [hash, token]
+            'UPDATE "BDTMA_USUA" SET "TMA_CONTRA" = $1, "TMA_RESETO" = NULL, "TMA_RESETP" = NULL WHERE "TMA_CORREO" = $2',
+            [hash, email]
         );
         res.json({ mensaje: "Contraseña restablecida correctamente" });
     } catch (error) {
