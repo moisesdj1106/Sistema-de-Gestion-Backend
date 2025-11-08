@@ -19,41 +19,115 @@ export const getTipoDocumentos = async (req, res) => {
 
 // Crear usuario
 export const createUser = async (req, res) => {
-    try {
-        const data = req.body;
-        const saltRounds = 10;
-        const hash = await bcrypt.hash(data.contraseña, saltRounds);
-        const rol = 'usuario';
+  try {
+    const data = req.body || {};
 
-        const rows = await pool.query(
-            `INSERT INTO "BDTMA_USUA" (
-                "TMA_CEDULA", "TMA_NOMBRE", "TMA_APELLI", "TMA_DIRECC", "TMA_TELEFO", "TMA_SEXOTP", "TMA_FENACI", 
-                "TMA_USUARI", "TMA_CONTRA", "TMA_CORREO", "TMA_ROLE", "TMA_CODCOM", "TMA_TIPODO"
-            ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
-            ) RETURNING *`,
-            [
-                data.cedula, 
-                data.nombres, 
-                data.apellidos, 
-                data.direccion, 
-                data.telefono, 
-                data.sexo, 
-                data.fecha_nac, 
-                data.usuario, 
-                hash, 
-                data.email, 
-                rol, 
-                data.codcom, 
-                data.tipodo
-            ]
-        );
+    // Normalizar / trim
+    const cedula = String(data.cedula || '').trim();
+    const nombres = String(data.nombres || '').trim();
+    const apellidos = data.apellidos ? String(data.apellidos).trim() : null;
+    const direccion = data.direccion ? String(data.direccion).trim() : null;
+    const telefono = data.telefono ? String(data.telefono).trim() : null;
+    const sexo = data.sexo || null;
+    const fecha_nac = data.fecha_nac || null;
+    const usuario = String(data.usuario || '').trim();
+    const contraseña = String(data.contraseña || '');
+    const email = String((data.email || '').toLowerCase()).trim();
+    const codcom = data.codcom || null;
+    const tipodo = data.tipodo || null;
+    const rol = data.rol || 'usuario';
 
-        return res.json(rows[0]);
-    } catch (error) {
-        console.error("Error en la inserción:", error);
-        return res.status(500).json({ message: "Error al crear el usuario", error: error.message });
+    const errors = [];
+
+    // Regex helpers
+    const nameRegex = /^[A-Za-zÁÉÍÓÚáéíóúÑñ\s'\-]+$/;
+    const digitsRegex = /^\d+$/;
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    // Validaciones
+    if (!cedula) errors.push('Cédula es obligatoria');
+    else if (!digitsRegex.test(cedula)) errors.push('Cédula inválida (solo dígitos)');
+
+    if (!nombres) errors.push('Nombres son obligatorios');
+    else if (!nameRegex.test(nombres)) errors.push('Nombres inválidos (solo letras, espacios, - y \')');
+
+    if (apellidos && !nameRegex.test(apellidos)) errors.push('Apellidos inválidos (solo letras, espacios, - y \')');
+
+    if (!usuario) errors.push('Usuario es obligatorio');
+
+    if (!email) errors.push('Correo es obligatorio');
+    else if (!emailRegex.test(email)) errors.push('Correo inválido');
+
+    if (!contraseña) errors.push('Contraseña es obligatoria');
+    else if (contraseña.length < 6) errors.push('Contraseña debe tener al menos 6 caracteres');
+
+    if (telefono && !digitsRegex.test(telefono)) errors.push('Teléfono inválido (solo dígitos)');
+
+    if (fecha_nac) {
+      const f = new Date(fecha_nac);
+      const hoy = new Date();
+      hoy.setHours(0,0,0,0);
+      f.setHours(0,0,0,0);
+      if (isNaN(f.getTime())) errors.push('Fecha de nacimiento inválida');
+      else if (f > hoy) errors.push('Fecha de nacimiento no puede ser mayor a la fecha actual');
     }
+
+    if (errors.length > 0) {
+      return res.status(400).json({ codigo: 'VALIDATION_ERROR', errores: errors });
+    }
+
+    // Pre-check en BD para cédula, usuario o correo existentes
+    const conflict = await pool.query(
+      `SELECT "TMA_CEDULA", "TMA_USUARI", "TMA_CORREO" FROM "BDTMA_USUA"
+       WHERE "TMA_CEDULA" = $1 OR "TMA_USUARI" = $2 OR "TMA_CORREO" = $3 LIMIT 1`,
+      [cedula, usuario, email]
+    );
+    if (conflict.rows.length > 0) {
+      const row = conflict.rows[0];
+      const detalles = [];
+      if (row.TMA_CEDULA && String(row.TMA_CEDULA) === cedula) detalles.push('Cédula ya registrada');
+      if (row.TMA_USUARI && String(row.TMA_USUARI) === usuario) detalles.push('Usuario ya existe');
+      if (row.TMA_CORREO && String(row.TMA_CORREO).toLowerCase() === email) detalles.push('Correo ya registrado');
+      return res.status(409).json({ codigo: 'CONFLICT', mensaje: 'Conflicto de datos', detalles });
+    }
+
+    // Hash y creación
+    const saltRounds = 10;
+    const hash = await bcrypt.hash(contraseña, saltRounds);
+
+    const result = await pool.query(
+      `INSERT INTO "BDTMA_USUA" (
+          "TMA_CEDULA", "TMA_NOMBRE", "TMA_APELLI", "TMA_DIRECC", "TMA_TELEFO", "TMA_SEXOTP", "TMA_FENACI",
+          "TMA_USUARI", "TMA_CONTRA", "TMA_CORREO", "TMA_ROLE", "TMA_CODCOM", "TMA_TIPODO"
+       ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+       ) RETURNING "TMA_CEDULA", "TMA_NOMBRE", "TMA_APELLI", "TMA_DIRECC", "TMA_TELEFO", "TMA_USUARI", "TMA_CORREO", "TMA_ROLE"`,
+      [
+        cedula,
+        nombres,
+        apellidos,
+        direccion,
+        telefono,
+        sexo,
+        fecha_nac,
+        usuario,
+        hash,
+        email,
+        rol,
+        codcom,
+        tipodo
+      ]
+    );
+
+    return res.status(201).json({ mensaje: 'Usuario creado', usuario: result.rows[0] });
+  } catch (error) {
+    // Postgres unique violation
+    if (error && error.code === '23505') {
+      return res.status(409).json({ codigo: 'CONFLICT', mensaje: 'Valor duplicado en la base de datos', detalle: error.detail || null });
+    }
+    console.error("Error en createUser:", error);
+    return res.status(500).json({ codigo: 'INTERNAL_ERROR', message: "Error al crear el usuario" });
+  }
 };
 
 // Validar usuario (login)
@@ -445,7 +519,7 @@ export const eliminarDamnificado = async (req, res) => {
     }
 };
 
-// Listar víctimas con búsqueda y paginación
+// Listar víctimas with búsqueda y paginación
 export const listarVictimas = async (req, res) => {
     try {
         const { page = 1, search = "" } = req.query;
