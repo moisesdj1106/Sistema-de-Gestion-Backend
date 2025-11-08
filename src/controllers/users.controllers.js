@@ -49,9 +49,9 @@ export const createUser = async (req, res) => {
     else if (!digitsRegex.test(cedula)) errors.push('Cédula inválida (solo dígitos)');
 
     if (!nombres) errors.push('Nombres son obligatorios');
-    else if (!nameRegex.test(nombres)) errors.push('Nombres inválidos (solo letras, espacios, - y \')');
+    else if (!nameRegex.test(nombres)) errors.push('Nombres inválidos solo letras (solo letras, espacios,)');
 
-    if (apellidos && !nameRegex.test(apellidos)) errors.push('Apellidos inválidos (solo letras, espacios, - y \')');
+    if (apellidos && !nameRegex.test(apellidos)) errors.push('Apellidos inválidos solo letras (solo letras, espacios, - y \')');
 
     if (!usuario) errors.push('Usuario es obligatorio');
 
