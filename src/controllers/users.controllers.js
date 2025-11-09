@@ -828,22 +828,66 @@ export const getDashboardData = async (req, res) => {
 
 // Registrar donante
 export const registrarDonante = async (req, res) => {
-    try {
-        const { nombre, contac, tipodn, cedula, coddoc } = req.body;
-        if (!nombre || !contac || !tipodn || !cedula || !coddoc) {
-            return res.status(400).json({ mensaje: "Faltan campos obligatorios" });
-        }
-        const result = await pool.query(
-            `INSERT INTO "BDTMA_DONT" 
-            ("TMA_NOMBRE", "TMA_CONTAC", "TMA_TIPODN", "TMA_CEDULA", "TMA_CODDOC")
-            VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-            [nombre, contac, tipodn, cedula, coddoc]
-        );
-        res.status(201).json({ mensaje: "Donante registrado", donante: result.rows[0] });
-    } catch (error) {
-        console.error("Error al registrar donante:", error);
-        res.status(500).json({ mensaje: "Error al registrar donante", error: error.message });
+  try {
+    const data = req.body || {};
+
+    // Normalizar / trim y extracción de campos
+    const nombre = String(data.nombre || '').trim();
+    const contac = String(data.contac || '').trim();
+    const tipodn = data.tipodn || null;
+    const cedula = String(data.cedula || '').trim();
+    const coddoc = data.coddoc || null;
+
+    const errors = [];
+
+    // Regex helpers
+    const nameRegex = /^[A-Za-zÁÉÍÓÚáéíóúÑñ\s'\-]+$/;
+    const digitsRegex = /^\d+$/;
+
+    // Validaciones
+    if (!cedula) errors.push('Cédula es obligatoria');
+    else if (!digitsRegex.test(cedula)) errors.push('Cédula inválida (solo dígitos)');
+    // opcional: longitud mínima/ máxima de cédula
+    // if (cedula.length < 6) errors.push('Cédula demasiado corta');
+
+    if (!nombre) errors.push('Nombre es obligatorio');
+    else if (!nameRegex.test(nombre)) errors.push("Nombre inválido (solo letras, espacios, guión o apóstrofe)");
+
+    if (!contac) errors.push('Contacto es obligatorio');
+    if (!tipodn) errors.push('Tipo de donante es obligatorio');
+    if (!coddoc) errors.push('Tipo de documento es obligatorio');
+
+    if (errors.length > 0) {
+      return res.status(400).json({ codigo: 'VALIDATION_ERROR', errores: errors });
     }
+
+    // Pre-check para evitar duplicados por cédula
+    const exists = await pool.query(
+      `SELECT 1 FROM "BDTMA_DONT" WHERE "TMA_CEDULA" = $1 LIMIT 1`,
+      [cedula]
+    );
+    if (exists.rows.length > 0) {
+      return res.status(409).json({ codigo: 'CONFLICT', mensaje: 'Ya existe un donante con esa cédula' });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO "BDTMA_DONT" 
+       ("TMA_NOMBRE", "TMA_CONTAC", "TMA_TIPODN", "TMA_CEDULA", "TMA_CODDOC")
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [nombre, contac, tipodn, cedula, coddoc]
+    );
+
+    res.status(201).json({ mensaje: "Donante registrado", donante: result.rows[0] });
+  } catch (error) {
+    console.error("Error al registrar donante:", error);
+    if (error && error.code === '23505') {
+      return res.status(409).json({ mensaje: "Registro duplicado", detail: error.detail || null });
+    }
+    if (error && error.code === '23503') {
+      return res.status(400).json({ mensaje: "Clave foránea inválida", detail: error.detail || null });
+    }
+    res.status(500).json({ mensaje: "Error al registrar donante", error: error.message });
+  }
 };
 
 
