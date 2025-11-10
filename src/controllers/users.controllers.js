@@ -1093,49 +1093,86 @@ export const eliminarNoticia = async (req, res) => {
 
 
 // Transporte global
+const EMAIL_HOST = process.env.EMAIL_HOST || 'smtp.gmail.com';
+const EMAIL_PORT = process.env.EMAIL_PORT ? Number(process.env.EMAIL_PORT) : (process.env.EMAIL_SECURE === 'true' ? 465 : 587);
+const EMAIL_SECURE = process.env.EMAIL_SECURE === 'true'; // true para 465
+const EMAIL_USER = process.env.EMAIL_USER || '';
+const EMAIL_PASS = process.env.EMAIL_PASS || '';
+const EMAIL_REJECT_UNAUTHORIZED = process.env.EMAIL_REJECT_UNAUTHORIZED !== 'false';
+const FRONTEND_URL = process.env.FRONTEND_URL || 'https://sistema-de-gestion-desastres.netlify.app';
+
 const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-        user: 'gestion.desastres2025@gmail.com',
-        pass: 'zvfx ripj vqzx xnyf'
-    }
+  host: EMAIL_HOST,
+  port: EMAIL_PORT,
+  secure: EMAIL_SECURE,
+  auth: EMAIL_USER && EMAIL_PASS ? { user: EMAIL_USER, pass: EMAIL_PASS } : undefined,
+  requireTLS: true,
+  tls: { rejectUnauthorized: EMAIL_REJECT_UNAUTHORIZED },
+  connectionTimeout: 30000,
+  greetingTimeout: 30000,
+  socketTimeout: 30000,
+  pool: false,
+  logger: process.env.NODE_ENV !== 'production', // logs en desarrollo
+  debug: process.env.NODE_ENV !== 'production'
 });
 
-// Solicitar recuperación
+transporter.verify()
+  .then(() => console.log('SMTP transporter verificado'))
+  .catch(err => console.warn('Advertencia SMTP verify:', err && err.message ? err.message : err));
+
+// Solicitar recuperación con manejo de errores más explícito
 export const solicitarRecuperacion = async (req, res) => {
-    const { email } = req.body;
+  const { email } = req.body || {};
+  if (!email) return res.status(400).json({ mensaje: 'Correo requerido' });
+
+  try {
+    const result = await pool.query('SELECT * FROM "BDTMA_USUA" WHERE "TMA_CORREO" = $1', [email]);
+    if (result.rows.length === 0) return res.status(404).json({ mensaje: 'Correo no registrado' });
+    const usuario = result.rows[0];
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiracion = new Date(Date.now() + 60 * 60 * 1000);
+
+    await pool.query(
+      'UPDATE "BDTMA_USUA" SET "TMA_RESETO" = $1, "TMA_RESETP" = $2 WHERE "TMA_CORREO" = $3',
+      [token, expiracion, email]
+    );
+
+    // Enlace sin token en URL (frontend pedirá email + nueva contraseña)
+    const enlace = `${FRONTEND_URL}/restablecer`;
+
+    const mailOptions = {
+      from: EMAIL_USER ? `"Soporte" <${EMAIL_USER}>` : '"Soporte" <no-reply@example.com>',
+      to: email,
+      subject: 'Recuperación de acceso',
+      html: `<p>Hola,</p>
+             <p>Solicitud de restablecimiento para el usuario: <strong>${usuario.TMA_USUARI || ''}</strong></p>
+             <p>Abra este enlace y complete el formulario con su correo y nueva contraseña:</p>
+             <p><a href="${enlace}">${enlace}</a></p>
+             <p>La solicitud expirará en 1 hora.</p>`
+    };
+
     try {
-        const result = await pool.query('SELECT * FROM "BDTMA_USUA" WHERE "TMA_CORREO" = $1', [email]);
-        if (result.rows.length === 0) {
-            return res.status(404).json({ mensaje: "Correo no registrado" });
-        }
-        const usuario = result.rows[0];
-
-        const token = crypto.randomBytes(32).toString('hex');
-        const expiracion = new Date(Date.now() + 60 * 60 * 1000); // 1 hora
-
-        await pool.query(
-            'UPDATE "BDTMA_USUA" SET "TMA_RESETO" = $1, "TMA_RESETP" = $2 WHERE "TMA_CORREO" = $3',
-            [token, expiracion, email]
-        );
-
-        const enlace = `https://sistema-de-gestion-desastres.netlify.app/restablecer/${token}`;
-
-        await transporter.sendMail({
-            from: '"Soporte" <gestion.desastres2025@gmail.com>',
-            to: email,
-            subject: "Recuperación de acceso",
-            html: `<p>Hola tu nombre de usuario es: ${usuario.TMA_USUARI || ''},</p>
-                   <p>Haz clic en el siguiente enlace para restablecer tu contraseña:</p>
-                   <a href="${enlace}">${enlace}</a>
-                   <p>Este enlace expirará en 1 hora.</p>`
-        });
-
-        res.json({ mensaje: "Correo de recuperación enviado" });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ mensaje: "Error enviando correo de recuperación", error: error.message });
+      await transporter.sendMail(mailOptions);
+      return res.json({ mensaje: 'Correo de recuperación enviado' });
+    } catch (mailErr) {
+      console.error('Error SMTP sendMail:', mailErr);
+      // Mapear errores comunes
+      if (mailErr && mailErr.code === 'ETIMEDOUT') {
+        return res.status(502).json({ mensaje: 'Tiempo de espera agotado al conectar con el servidor de correo (ETIMEDOUT). Revise configuración SMTP o use un proveedor por API.' });
+      }
+      if (mailErr && mailErr.code === 'ECONNECTION') {
+        return res.status(502).json({ mensaje: 'No se pudo establecer conexión SMTP. Verifique host/puerto y restricciones de red.' });
+      }
+      if (mailErr && /Auth/.test(String(mailErr.message))) {
+        return res.status(502).json({ mensaje: 'Error de autenticación SMTP. Verifique EMAIL_USER/EMAIL_PASS.' });
+      }
+      return res.status(500).json({ mensaje: 'Error enviando correo de recuperación', error: mailErr && mailErr.message ? mailErr.message : String(mailErr) });
     }
+  } catch (error) {
+    console.error('Error en solicitarRecuperacion:', error);
+    return res.status(500).json({ mensaje: 'Error procesando solicitud de recuperación', error: error.message });
+  }
 };
 
 // Restablecer contraseña
@@ -1803,7 +1840,6 @@ export const generarPdfResumenAfectacionesPorFecha = async (req, res) => {
     res.status(500).json({ mensaje: 'Error al generar PDF', error: error.message });
   }
 };
-
 
 // Listar todos los usuarios con campos relevantes
 export const listarUsuarios = async (req, res) => {
