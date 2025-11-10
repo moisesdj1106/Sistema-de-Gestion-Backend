@@ -1092,787 +1092,135 @@ export const eliminarNoticia = async (req, res) => {
 
 
 
-// Transporte global
+// Transporte SMTP configurable via .env (no credenciales en código)
+const EMAIL_HOST = process.env.EMAIL_HOST || 'smtp.gmail.com';
+const EMAIL_PORT = process.env.EMAIL_PORT ? Number(process.env.EMAIL_PORT) : undefined;
+const EMAIL_SECURE = process.env.EMAIL_SECURE === 'true'; // true -> 465
+const EMAIL_USER = process.env.EMAIL_USER || '';
+const EMAIL_PASS = process.env.EMAIL_PASS || '';
+const FRONTEND_URL = process.env.FRONTEND_URL || 'https://sistema-de-gestion-desastres.netlify.app';
+
 const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-        user: 'moises.becerra07@gmail.com',
-        pass: 'lmhf gbos prmb lwrx'
-    }
+  host: EMAIL_HOST,
+  port: EMAIL_PORT || (EMAIL_SECURE ? 465 : 587),
+  secure: EMAIL_SECURE,
+  auth: EMAIL_USER && EMAIL_PASS ? { user: EMAIL_USER, pass: EMAIL_PASS } : undefined,
+  requireTLS: true,
+  tls: { rejectUnauthorized: process.env.EMAIL_REJECT_UNAUTHORIZED !== 'false' },
+  connectionTimeout: 30000,
+  greetingTimeout: 30000,
+  socketTimeout: 30000,
+  pool: false,
 });
 
-// Solicitar recuperación
+// Verificar transporter al arrancar (log)
+transporter.verify()
+  .then(() => console.log('Transporter SMTP verificado'))
+  .catch(err => console.error('Advertencia: no se pudo verificar SMTP transporter:', err && err.message ? err.message : err));
+
+
+// Solicitar recuperación (envía enlace SIN token en URL; token se guarda en BD)
 export const solicitarRecuperacion = async (req, res) => {
-    const { email } = req.body;
-    try {
-        const result = await pool.query('SELECT * FROM "BDTMA_USUA" WHERE "TMA_CORREO" = $1', [email]);
-        if (result.rows.length === 0) {
-            return res.status(404).json({ mensaje: "Correo no registrado" });
-        }
-        const usuario = result.rows[0];
+  const { email } = req.body || {};
+  if (!email) return res.status(400).json({ mensaje: 'Correo requerido' });
 
-        const token = crypto.randomBytes(32).toString('hex');
-        const expiracion = new Date(Date.now() + 60 * 60 * 1000); // 1 hora
-
-        await pool.query(
-            'UPDATE "BDTMA_USUA" SET "TMA_RESETO" = $1, "TMA_RESETP" = $2 WHERE "TMA_CORREO" = $3',
-            [token, expiracion, email]
-        );
-
-        const enlace = `https://sistema-de-gestion-desastres.netlify.app/restablecer/${token}`;
-
-        await transporter.sendMail({
-            from: '"Soporte Liceo" <moises.becerra07@gmail.com>',
-            to: email,
-            subject: "Recuperación de acceso",
-            html: `<p>Hola tu nombre de usuario es: ${usuario.TMA_USUARI || ''},</p>
-                   <p>Haz clic en el siguiente enlace para restablecer tu contraseña:</p>
-                   <a href="${enlace}">${enlace}</a>
-                   <p>Este enlace expirará en 1 hora.</p>`
-        });
-
-        res.json({ mensaje: "Correo de recuperación enviado" });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ mensaje: "Error enviando correo de recuperación", error: error.message });
+  try {
+    const result = await pool.query('SELECT * FROM "BDTMA_USUA" WHERE "TMA_CORREO" = $1', [email]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ mensaje: "Correo no registrado" });
     }
+    const usuario = result.rows[0];
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiracion = new Date(Date.now() + 60 * 60 * 1000); // 1 hora
+
+    await pool.query(
+      'UPDATE "BDTMA_USUA" SET "TMA_RESETO" = $1, "TMA_RESETP" = $2 WHERE "TMA_CORREO" = $3',
+      [token, expiracion, email]
+    );
+
+    // Enlace al frontend SIN token
+    const enlace = `${FRONTEND_URL}/restablecer`;
+
+    const fromAddress = EMAIL_USER ? `"Soporte Liceo" <${EMAIL_USER}>` : '"Soporte Liceo" <no-reply@example.com>';
+
+    const mailOptions = {
+      from: fromAddress,
+      to: email,
+      subject: "Recuperación de acceso",
+      html: `<p>Hola,</p>
+             <p>Hemos recibido una solicitud para restablecer la contraseña de tu cuenta (usuario: <strong>${usuario.TMA_USUARI || ''}</strong>).</p>
+             <p>Por favor abre este enlace y completa el formulario indicando tu correo y la nueva contraseña:</p>
+             <p><a href="${enlace}" target="_blank" rel="noopener">${enlace}</a></p>
+             <p>Este enlace (la solicitud) expirará en 1 hora. Si no has solicitado el cambio, ignora este correo.</p>`
+    };
+
+    try {
+      await transporter.sendMail(mailOptions);
+      return res.json({ mensaje: "Correo de recuperación enviado" });
+    } catch (mailErr) {
+      console.error('Error enviando correo:', mailErr);
+      if (mailErr && mailErr.code === 'ETIMEDOUT') {
+        return res.status(500).json({ mensaje: "Tiempo de espera agotado al enviar correo. Revise la configuración SMTP o use un proveedor de envío (SendGrid/Mailgun)." });
+      }
+      if (mailErr && (mailErr.code === 'ECONNECTION' || /Auth|Invalid/.test(mailErr.message))) {
+        return res.status(500).json({ mensaje: "Error de conexión o autenticación SMTP. Revise credenciales y configuración." });
+      }
+      return res.status(500).json({ mensaje: "Error enviando correo de recuperación", error: mailErr && mailErr.message ? mailErr.message : String(mailErr) });
+    }
+  } catch (error) {
+    console.error('Error en solicitarRecuperacion:', error);
+    return res.status(500).json({ mensaje: "Error procesando solicitud de recuperación", error: error.message });
+  }
 };
+
 
 // Restablecer contraseña
+// Soporta:
+//  - POST /restablecer con { email, nuevaContrasena } (frontend nuevo)
+//  - POST /restablecer/:token con { nuevaContrasena } (compatibilidad)
 export const restablecerContrasena = async (req, res) => {
-    const { token } = req.params;
-    const { nuevaContrasena } = req.body;
-    try {
-        const result = await pool.query(
-            'SELECT * FROM "BDTMA_USUA" WHERE "TMA_RESETO" = $1 AND "TMA_RESETP" > NOW()',
-            [token]
-        );
-        if (result.rows.length === 0) {
-            return res.status(400).json({ mensaje: "Token inválido o expirado" });
-        }
-        const hash = await bcrypt.hash(nuevaContrasena, 10);
+  const tokenParam = req.params?.token;
+  const { email, nuevaContrasena } = req.body || {};
 
-        await pool.query(
-            'UPDATE "BDTMA_USUA" SET "TMA_CONTRA" = $1, "TMA_RESETO" = NULL, "TMA_RESETP" = NULL WHERE "TMA_RESETO" = $2',
-            [hash, token]
-        );
-        res.json({ mensaje: "Contraseña restablecida correctamente" });
-    } catch (error) {
-        res.status(500).json({ mensaje: "Error al restablecer la contraseña", error: error.message });
-    }
-};
-
-////
-// Listar países
-export const listarPaises = async (req, res) => {
-    try {
-        const result = await pool.query('SELECT "TMA_COPAIS", "TMA_NOMBRE" FROM "BDTMA_PAIS" ORDER BY "TMA_NOMBRE"');
-        res.json(result.rows);
-    } catch (error) {
-        console.error("Error al listar países:", error);
-        res.status(500).json({ mensaje: "Error al listar países", error: error.message });
-    }
-};
-
-// Listar estados por país
-export const listarEstadosPorPais = async (req, res) => {
-    const { codpais } = req.params;
-    try {
-        const result = await pool.query(
-            'SELECT "TMA_COESTA", "TMA_NOMBRE" FROM "BDTMA_ESTD" WHERE "TMA_COPAIS" = $1 ORDER BY "TMA_NOMBRE"',
-            [codpais]
-        );
-        res.json(result.rows);
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ mensaje: "Error al listar estados" });
-    }
-};
-
-// Listar municipios por estado
-export const listarMunicipiosPorEstado = async (req, res) => {
-    const { coesta } = req.params;
-    try {
-        const result = await pool.query(
-            'SELECT "TMA_COMUNI", "TMA_NOMBRE" FROM "BDTMA_MUNI" WHERE "TMA_COESTA" = $1 ORDER BY "TMA_NOMBRE"',
-            [coesta]
-        );
-        res.json(result.rows);
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ mensaje: "Error al listar municipios" });
-    }
-};
-
-// Listar parroquias por municipio
-export const listarParroquiasPorMunicipio = async (req, res) => {
-    const { comuni } = req.params;
-    try {
-        const result = await pool.query(
-            'SELECT "TMA_COPARR", "TMA_NOMBRE" FROM "BDTMA_PARR" WHERE "TMA_COMUNI" = $1 ORDER BY "TMA_NOMBRE"',
-            [comuni]
-        );
-        res.json(result.rows);
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ mensaje: "Error al listar parroquias" });
-    }
-};
-
-// Listar comunidades por parroquia (para el select dependiente)
-export const listarComunidadesPorParroquia = async (req, res) => {
-    const { coparr } = req.params;
-    try {
-        const result = await pool.query(
-            'SELECT "TMA_CODCOM", "TMA_NOMBRE" FROM "BDTMA_COMU" WHERE "TMA_COPARR" = $1 ORDER BY "TMA_NOMBRE"',
-            [coparr]
-        );
-        res.json(result.rows);
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ mensaje: "Error al listar comunidades" });
-    }
-};
-
-
-
-// Listar todas las afectaciones
-export const listarAfectaciones = async (req, res) => {
-  try {
-    const result = await pool.query(
-      `SELECT "TTR_COAFEC", "TTR_CODCOM", "TTR_FEAFEC", "TTR_CODESA"
-       FROM "BDTTR_AFEC"
-       ORDER BY "TTR_COAFEC" DESC
-       `
-
-    );
-    res.json(result.rows);
-  } catch (error) {
-    console.error('Error al listar afectaciones:', error);
-    res.status(500).json({ mensaje: 'Error al listar afectaciones', error: error.message });
+  if (!nuevaContrasena || String(nuevaContrasena).length < 6) {
+    return res.status(400).json({ mensaje: "Contraseña inválida (mínimo 6 caracteres)" });
   }
-};
 
-export const obtenerUltimaAfectacion = async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT "TTR_COAFEC", "TTR_CODCOM", "TTR_FEAFEC", "TTR_CODESA"
-       FROM "BDTTR_AFEC"
-       ORDER BY "TTR_COAFEC" DESC
-       LIMIT 1`
-    );
-    if (result.rows.length === 0) {
-      return res.status(404).json({ mensaje: 'No hay afectaciones registradas' });
-    }
-    res.json(result.rows[0]);
-  } catch (error) {
-    console.error('Error al obtener la última afectación:', error);
-    res.status(500).json({ mensaje: 'Error al obtener la última afectación', error: error.message });
-  }
-};
+    let usuarioRow;
 
-// Editar una afectación
-export const editarAfectacion = async (req, res) => {
-  const { id } = req.params;
-  const { TTR_CODCOM, TTR_FEAFEC, TTR_CODESA } = req.body;
-  try {
-    const result = await pool.query(
-      `UPDATE "BDTTR_AFEC"
-       SET "TTR_CODCOM" = $1, "TTR_FEAFEC" = $2, "TTR_CODESA" = $3
-       WHERE "TTR_COAFEC" = $4
-       RETURNING *`,
-      [TTR_CODCOM, TTR_FEAFEC, TTR_CODESA, id]
-    );
-    if (result.rowCount === 0) {
-      return res.status(404).json({ mensaje: 'Afectación no encontrada' });
-    }
-    res.json({ mensaje: 'Afectación actualizada', afectacion: result.rows[0] });
-  } catch (error) {
-    console.error('Error al editar afectación:', error);
-    res.status(500).json({ mensaje: 'Error al editar afectación', error: error.message });
-  }
-};
+    if (tokenParam) {
+      // ruta antigua con token en URL
+      const result = await pool.query(
+        'SELECT * FROM "BDTMA_USUA" WHERE "TMA_RESETO" = $1 AND "TMA_RESETP" > NOW()',
+        [tokenParam]
+      );
+      if (result.rows.length === 0) return res.status(400).json({ mensaje: "Token inválido o expirado" });
+      usuarioRow = result.rows[0];
+    } else {
+      // nuevo flujo: se recibe email, verificamos que exista solicitud activa (TMA_RESETO no nulo y TMA_RESETP > now)
+      if (!email) return res.status(400).json({ mensaje: "Email requerido" });
 
-// Eliminar una afectación
-export const eliminarAfectacion = async (req, res) => {
-  const { id } = req.params;
-  try {
-    const result = await pool.query(
-      `DELETE FROM "BDTTR_AFEC" WHERE "TTR_COAFEC" = $1`,
-      [id]
-    );
-    if (result.rowCount === 0) {
-      return res.status(404).json({ mensaje: 'Afectación no encontrada' });
+      const result = await pool.query(
+        'SELECT * FROM "BDTMA_USUA" WHERE "TMA_CORREO" = $1 AND "TMA_RESETO" IS NOT NULL AND "TMA_RESETP" > NOW()',
+        [email]
+      );
+      if (result.rows.length === 0) return res.status(400).json({ mensaje: "No hay una solicitud válida de restablecimiento para este correo (token inválido o expirado)" });
+      usuarioRow = result.rows[0];
     }
-    res.json({ mensaje: 'Afectación eliminada' });
-  } catch (error) {
-    console.error('Error al eliminar afectación:', error);
-    res.status(500).json({ mensaje: 'Error al eliminar afectación', error: error.message });
-  }
-};
 
-export const generarPdfAfectacion = async (req, res) => {
-  const { id } = req.params;
-  try {
-    // 1. Obtener datos de la afectación
-    const afectacionResult = await pool.query(
-      `SELECT a."TTR_COAFEC", a."TTR_FEAFEC", c."TMA_NOMBRE" as comunidad, d."TMA_NOMBRE" as desastre
-       FROM "BDTTR_AFEC" a
-       JOIN "BDTMA_COMU" c ON a."TTR_CODCOM" = c."TMA_CODCOM"
-       JOIN "BDTMA_DESA" d ON a."TTR_CODESA" = d."TMA_CODESA"
-       WHERE a."TTR_COAFEC" = $1`,
-      [id]
-    );
-    if (afectacionResult.rows.length === 0) {
-      return res.status(404).json({ mensaje: "Afectación no encontrada" });
-    }
-    const afectacion = afectacionResult.rows[0];
+    const hash = await bcrypt.hash(String(nuevaContrasena), 10);
 
-    // 2. Damnificados
-    const damnificadosResult = await pool.query(
-      `SELECT "TTR_NOMBRE", "TTR_APELLI", "TTR_CEDULA", "TTR_FENACI", "TTR_CONTAC", "TTR_ESALUD"
-       FROM "BDTTR_DAMN"
-       WHERE "TTR_COAFEC" = $1`,
-      [id]
+    await pool.query(
+      'UPDATE "BDTMA_USUA" SET "TMA_CONTRA" = $1, "TMA_RESETO" = NULL, "TMA_RESETP" = NULL WHERE "TMA_CEDULA" = $2 OR "TMA_CORREO" = $3',
+      [hash, usuarioRow.TMA_CEDULA, usuarioRow.TMA_CORREO]
     );
 
-    // 3. Víctimas
-    const victimasResult = await pool.query(
-      `SELECT "TTR_NOMBRE", "TTR_APELLI", "TTR_CEDULA", "TTR_CERTIF"
-       FROM "BDTTR_VICT"
-       WHERE "TTR_COAFEC" = $1`,
-      [id]
-    );
-
-    // 4. Pérdidas
-    const perdidasResult = await pool.query(
-      `SELECT p."TTR_NOMBRE", p."TTR_APELLI", p."TTR_CEDULA", t."TTR_NOMBRE" as tipo_perdida, p."TTR_VAESTI"
-       FROM "BDTTR_PERD" p
-       JOIN "BDTTR_TIPE" t ON p."TTR_COTIPO" = t."TTR_COTIPO"
-       WHERE p."TTR_COAFEC" = $1`,
-      [id]
-    );
-
-    // 5. Construir el documento PDF
-    const docDefinition = {
-      content: [
-        // Membrete con espacio para logos
-        {
-          columns: [
-            {
-              image: 'src/assets/logodesastres-removebg-preview.png',
-              width: 73,
-              height: 70,   
-              alignment: 'left',
-              margin: [0, 0, 0, 0]
-            },
-            {
-              stack: [
-                { text: 'República Bolivariana De Venezuela', style: 'membrete', alignment: 'center' },
-                { text: 'Ministerio del Poder Popular para Relaciones Interiores, Justicia y Paz', style: 'membrete', alignment: 'center' },
-                { text: 'Dirección Nacional De Protección Civil y Administración de Desastres', style: 'membrete', alignment: 'center' },
-                { text: 'Sistema de Gestión De Desastres Naturales', style: 'membrete', alignment: 'center' }
-              ]
-            },
-            {
-              image: 'src/assets/logocivil.jpeg',
-              width: 71,
-              height: 70,   
-              alignment: 'right',
-              margin: [0, 5, 0, 0]
-            }
-          ],
-          margin: [0, 0, 0, 10]
-        },
-        // Encabezado principal
-        { text: `REPORTE DE AFECTACIÓN`, style: 'header', alignment: 'center', margin: [0, 0, 0, 10] },
-        // Datos de la afectación en tabla
-        {
-          table: {
-            widths: ['auto', '*', 'auto', '*'],
-            body: [
-              [
-                { text: 'Comunidad:', bold: true, fillColor: '#eeeeee', alignment: 'right' },
-                { text: afectacion.comunidad, alignment: 'left', colSpan: 3, border: [false, true, false, true] }, {}, {}
-              ],
-              [
-                { text: 'Desastre:', bold: true, fillColor: '#eeeeee', alignment: 'right' },
-                { text: afectacion.desastre, alignment: 'left', border: [false, true, false, true] },
-                { text: 'Fecha:', bold: true, fillColor: '#eeeeee', alignment: 'right' },
-                { text: afectacion.TTR_FEAFEC ? new Date(afectacion.TTR_FEAFEC).toLocaleDateString('es-VE') : '', alignment: 'left', border: [false, true, false, true] }
-              ]
-            ]
-          },
-          layout: {
-            fillColor: (rowIndex, node, columnIndex) => rowIndex === 0 ? '#f5f5f5' : null,
-            hLineWidth: () => 1,
-            vLineWidth: () => 1,
-            hLineColor: () => '#bbb',
-            vLineColor: () => '#bbb',
-            paddingLeft: () => 6,
-            paddingRight: () => 6,
-            paddingTop: () => 4,
-            paddingBottom: () => 4
-          },
-          margin: [0, 0, 0, 15]
-        },
-
-        // Damnificados
-        { text: 'Damnificados', style: 'subheader', margin: [0, 10, 0, 4] },
-        damnificadosResult.rows.length === 0
-          ? { text: 'No hay damnificados registrados.', italics: true, margin: [0, 0, 0, 10] }
-          : {
-              table: {
-                headerRows: 1,
-                widths: ['auto', '*', '*', '*', '*', '*'],
-                body: [
-                  [
-                    { text: 'Cédula', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
-                    { text: 'Nombre', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
-                    { text: 'Apellido', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
-                    { text: 'Nacimiento', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
-                    { text: 'Contacto', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
-                    { text: 'Salud', bold: true, fillColor: '#e3e3e3', alignment: 'center' }
-                  ],
-                  ...damnificadosResult.rows.map(d => [
-                    { text: d.TTR_CEDULA, alignment: 'center' },
-                    { text: d.TTR_NOMBRE, alignment: 'center' },
-                    { text: d.TTR_APELLI, alignment: 'center' },
-                    { text: d.TTR_FENACI ? new Date(d.TTR_FENACI).toLocaleDateString('es-VE') : '', alignment: 'center' },
-                    { text: d.TTR_CONTAC, alignment: 'center' },
-                    { text: d.TTR_ESALUD, alignment: 'center' }
-                  ])
-                ]
-              },
-              layout: {
-                hLineWidth: () => 1,
-                vLineWidth: () => 1,
-                hLineColor: () => '#bbb',
-                vLineColor: () => '#bbb',
-                paddingLeft: () => 6,
-                paddingRight: () => 6,
-                paddingTop: () => 4,
-                paddingBottom: () => 4
-              },
-              margin: [0, 0, 0, 15]
-            },
-
-        // Víctim
-        { text: 'Víctimas', style: 'subheader', margin: [0, 10, 0, 4] },
-        victimasResult.rows.length === 0
-          ? { text: 'No hay víctimas registradas.', italics: true, margin: [0, 0, 0, 10] }
-          : {
-              table: {
-                headerRows: 1,
-                widths: ['auto', '*', '*', '*'],
-                body: [
-                  [
-                    { text: 'Cédula', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
-                    { text: 'Nombre', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
-                    { text: 'Apellido', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
-                    { text: 'N° Certificado', bold: true, fillColor: '#e3e3e3', alignment: 'center' }
-                  ],
-                  ...victimasResult.rows.map(v => [
-                    { text: v.TTR_CEDULA, alignment: 'center' },
-                    { text: v.TTR_NOMBRE, alignment: 'center' },
-                    { text: v.TTR_APELLI, alignment: 'center' },
-                    { text: v.TTR_CERTIF, alignment: 'center' }
-                  ])
-                ]
-              },
-              layout: {
-                hLineWidth: () => 1,
-                vLineWidth: () => 1,
-                hLineColor: () => '#bbb',
-                vLineColor: () => '#bbb',
-                paddingLeft: () => 6,
-                paddingRight: () => 6,
-                paddingTop: () => 4,
-                paddingBottom: () => 4
-              },
-              margin: [0, 0, 0, 15]
-            },
-
-        // Pérdidas
-        { text: 'Pérdidas', style: 'subheader', margin: [0, 10, 0, 4] },
-        perdidasResult.rows.length === 0
-          ? { text: 'No hay pérdidas registradas.', italics: true }
-          : {
-              table: {
-                headerRows: 1,
-                widths: ['auto', '*', '*', '*', 'auto'],
-                body: [
-                  [
-                    { text: 'Cédula', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
-                    { text: 'Nombre', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
-                    { text: 'Apellido', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
-                    { text: 'Tipo', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
-                    { text: 'Valor', bold: true, fillColor: '#e3e3e3', alignment: 'center' }
-                  ],
-                  ...perdidasResult.rows.map(p => [
-                    { text: p.TTR_CEDULA, alignment: 'center' },
-                    { text: p.TTR_NOMBRE, alignment: 'center' },
-                    { text: p.TTR_APELLI, alignment: 'center' },
-                    { text: p.tipo_perdida, alignment: 'center' },
-                    { text: p.TTR_VAESTI, alignment: 'center' }
-                  ])
-                ]
-              },
-              layout: {
-                hLineWidth: () => 1,
-                vLineWidth: () => 1,
-                hLineColor: () => '#bbb',
-                vLineColor: () => '#bbb',
-                paddingLeft: () => 6,
-                paddingRight: () => 6,
-                paddingTop: () => 4,
-                paddingBottom: () => 4
-              }
-            }
-      ],
-      images: {
-        // Puedes poner aquí la ruta base64 de tus logos o dejarlo vacío para luego agregarlo
-        logoIzquierdo: '', // Ejemplo: 'data:image/png;base64,...'
-        logoDerecho: ''    // Ejemplo: 'data:image/png;base64,...'
-      },
-      styles: {
-        membrete: { fontSize: 11, bold: true, margin: [0, 0, 0, 2], font: 'Helvetica' },
-        header: { fontSize: 16, bold: true, alignment: 'center', font: 'Helvetica' },
-        subheader: { fontSize: 13, bold: true, margin: [0, 10, 0, 4], font: 'Helvetica' }
-      },
-      defaultStyle: {
-        font: 'Helvetica'
-      }
-    };
-
-    // 6. Generar y enviar el PDF usando fuentes estándar
-    const fonts = {
-      Helvetica: {
-        normal: 'Helvetica',
-        bold: 'Helvetica-Bold',
-        italics: 'Helvetica-Oblique',
-        bolditalics: 'Helvetica-BoldOblique'
-      }
-    };
-
-    const printer = new PdfPrinter(fonts);
-    const pdfDoc = printer.createPdfKitDocument(docDefinition);
-    let chunks = [];
-    pdfDoc.on('data', chunk => chunks.push(chunk));
-    pdfDoc.on('end', () => {
-      const pdfBuffer = Buffer.concat(chunks);
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename=afectacion_${id}.pdf`);
-      res.send(pdfBuffer);
-    });
-    pdfDoc.end();
-
+    return res.json({ mensaje: "Contraseña restablecida correctamente" });
   } catch (error) {
-    console.error('Error al generar PDF:', error);
-    res.status(500).json({ mensaje: 'Error al generar PDF', error: error.message });
+    console.error('Error en restablecerContrasena:', error);
+    return res.status(500).json({ mensaje: "Error al restablecer la contraseña", error: error.message });
   }
 };
-
-
-export const listarAfectacionesResumenPorFecha = async (req, res) => {
-  const { desde, hasta } = req.query;
-  try {
-    const result = await pool.query(`
-      SELECT 
-        a."TTR_COAFEC",
-        c."TMA_NOMBRE" AS comunidad,
-        d."TMA_NOMBRE" AS desastre,
-        a."TTR_FEAFEC",
-        -- ¿Tiene damnificados?
-        EXISTS (
-          SELECT 1 FROM "BDTTR_DAMN" dam WHERE dam."TTR_COAFEC" = a."TTR_COAFEC"
-        ) AS tiene_damnificados,
-        -- ¿Tiene víctimas?
-        EXISTS (
-          SELECT 1 FROM "BDTTR_VICT" vic WHERE vic."TTR_COAFEC" = a."TTR_COAFEC"
-        ) AS tiene_victimas,
-        -- ¿Tiene pérdidas?
-        EXISTS (
-          SELECT 1 FROM "BDTTR_PERD" per WHERE per."TTR_COAFEC" = a."TTR_COAFEC"
-        ) AS tiene_perdidas
-      FROM "BDTTR_AFEC" a
-      JOIN "BDTMA_COMU" c ON a."TTR_CODCOM" = c."TMA_CODCOM"
-      JOIN "BDTMA_DESA" d ON a."TTR_CODESA" = d."TMA_CODESA"
-      WHERE a."TTR_FEAFEC" BETWEEN $1 AND $2
-      ORDER BY a."TTR_FEAFEC" DESC
-    `, [desde, hasta]);
-    res.json(result.rows);
-  } catch (error) {
-    console.error('Error al listar resumen de afectaciones:', error);
-    res.status(500).json({ mensaje: 'Error al listar resumen de afectaciones', error: error.message });
-  }
-};
-
-export const generarPdfResumenAfectacionesPorFecha = async (req, res) => {
-  const { desde, hasta } = req.query;
-  try {
-    // Lee la imagen y conviértela a base64
-    const logoPath = path.join(process.cwd(), 'src/assets/logodesastres-removebg-preview.png');
-    let logoBase64 = '';
-    try {
-      const imageBuffer = fs.readFileSync(logoPath);
-      logoBase64 = 'data:image/jpeg;base64,' + imageBuffer.toString('base64');
-    } catch (e) {
-      logoBase64 = '';
-    }
-
-    // Consulta con conteos y suma de pérdidas
-    const result = await pool.query(`
-      SELECT 
-        a."TTR_COAFEC",
-        c."TMA_NOMBRE" AS comunidad,
-        d."TMA_NOMBRE" AS desastre,
-        a."TTR_FEAFEC",
-        (SELECT COUNT(*) FROM "BDTTR_DAMN" dam WHERE dam."TTR_COAFEC" = a."TTR_COAFEC") AS cantidad_damnificados,
-        (SELECT COUNT(*) FROM "BDTTR_VICT" vic WHERE vic."TTR_COAFEC" = a."TTR_COAFEC") AS cantidad_victimas,
-        (SELECT COUNT(*) FROM "BDTTR_PERD" per WHERE per."TTR_COAFEC" = a."TTR_COAFEC") AS cantidad_perdidas,
-        COALESCE((SELECT SUM("TTR_VAESTI") FROM "BDTTR_PERD" per WHERE per."TTR_COAFEC" = a."TTR_COAFEC"), 0) AS suma_perdidas
-      FROM "BDTTR_AFEC" a
-      JOIN "BDTMA_COMU" c ON a."TTR_CODCOM" = c."TMA_CODCOM"
-      JOIN "BDTMA_DESA" d ON a."TTR_CODESA" = d."TMA_CODESA"
-      WHERE a."TTR_FEAFEC" BETWEEN $1 AND $2
-      ORDER BY a."TTR_FEAFEC" DESC
-    `, [desde, hasta]);
-
-    // Calcular totales
-    const totalAfectaciones = result.rows.length;
-    const totalDamnificados = result.rows.reduce((sum, r) => sum + Number(r.cantidad_damnificados || 0), 0);
-    const totalVictimas = result.rows.reduce((sum, r) => sum + Number(r.cantidad_victimas || 0), 0);
-    const totalPerdidas = result.rows.reduce((sum, r) => sum + Number(r.cantidad_perdidas || 0), 0);
-    const totalMontoPerdidas = result.rows.reduce((sum, r) => sum + Number(r.suma_perdidas || 0), 0);
-
-    const docDefinition = {
-      pageSize: { width: 1008, height: 612 },
-      pageOrientation: 'landscape',
-      content: [
-        {
-          columns: [
-            {
-              image: logoBase64,
-              width: 90,
-              alignment: 'left',
-              margin: [20, 0, 0, 10]
-            },
-            {
-              stack: [
-                { text: 'República Bolivariana De Venezuela', style: 'membrete', alignment: 'center' },
-                { text: 'Ministerio del Poder Popular para Relaciones Interiores, Justicia y Paz', style: 'membrete', alignment: 'center' },
-                { text: 'Dirección Nacional De Protección Civil y Administración de Desastres', style: 'membrete', alignment: 'center' },
-                { text: 'Sistema De Gestión De Desastres Naturales', style: 'membrete', alignment: 'center' }
-              ]
-            },
-            {
-              image: 'src/assets/logocivil.jpeg',
-              width: 80,
-              height: 75, 
-              alignment: 'right',
-              margin: [0, 15, 20, 10]
-            }
-          ]
-        },
-        { text: 'RESUMEN DE AFECTACIONES', style: 'header', alignment: 'center', margin: [0, 0, 0, 10] },
-        {
-          text: `Desde: ${desde}   Hasta: ${hasta}`,
-          alignment: 'center',
-          margin: [0, 0, 0, 10]
-        },
-        // Tabla de detalle principal
-        {
-          alignment: 'center',
-          table: {
-            headerRows: 1,
-            widths: [
-              30, 150, '*', 70, // #
-              80, 55,            // ¿Damnificados? | Cantidad
-              65, 55,            // ¿Víctimas?     | Cantidad
-              65, 55,            // ¿Pérdidas?     | Cantidad
-              100                // Total Pérdidas
-            ],
-            body: [
-              [
-                { text: '#', bold: true, fillColor: '#eeeeee', alignment: 'center' },
-                { text: 'Comunidad', bold: true, fillColor: '#eeeeee', alignment: 'center' },
-                { text: 'Desastre', bold: true, fillColor: '#eeeeee', alignment: 'center' },
-                { text: 'Fecha', bold: true, fillColor: '#eeeeee', alignment: 'center' },
-                { text: 'Damnificados', bold: true, fillColor: '#eeeeee', alignment: 'center' },
-                { text: 'Cantidad', bold: true, fillColor: '#eeeeee', alignment: 'center' },
-                { text: 'Víctimas', bold: true, fillColor: '#eeeeee', alignment: 'center' },
-                { text: 'Cantidad', bold: true, fillColor: '#eeeeee', alignment: 'center' },
-                { text: 'Pérdidas', bold: true, fillColor: '#eeeeee', alignment: 'center' },
-                { text: 'Cantidad', bold: true, fillColor: '#eeeeee', alignment: 'center' },
-                { text: 'Pérdidas Bs', bold: true, fillColor: '#eeeeee', alignment: 'center' }
-              ],
-              ...result.rows.map((a, idx) => [
-                { text: idx + 1, alignment: 'center' },
-                { text: a.comunidad, alignment: 'center' },
-                { text: a.desastre, alignment: 'center' },
-                { text: a.TTR_FEAFEC ? new Date(a.TTR_FEAFEC).toLocaleDateString('es-VE') : '', alignment: 'center' },
-                { text: a.cantidad_damnificados > 0 ? 'Sí' : 'No', alignment: 'center' },
-                { text: a.cantidad_damnificados || 0, alignment: 'center' },
-                { text: a.cantidad_victimas > 0 ? 'Sí' : 'No', alignment: 'center' },
-                { text: a.cantidad_victimas || 0, alignment: 'center' },
-                { text: a.cantidad_perdidas > 0 ? 'Sí' : 'No', alignment: 'center' },
-                { text: a.cantidad_perdidas || 0, alignment: 'center' },
-                { text: Number(a.suma_perdidas).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }), alignment: 'center' }
-              ])
-            ]
-          },
-          layout: {
-            hLineWidth: () => 1,
-            vLineWidth: () => 1,
-            hLineColor: () => '#bbb',
-            vLineColor: () => '#bbb',
-            paddingLeft: () => 6,
-            paddingRight: () => 6,
-            paddingTop: () => 4,
-            paddingBottom: () => 4
-          }
-        },
-        // Tabla de totales debajo de la principal
-        {
-          alignment: 'center',
-          margin: [125, 20, 0, 0],
-          table: {
-            widths: [120, 120, 120, 120, 120],
-            body: [
-              [
-                { text: 'Total Afectaciones', bold: true, fillColor: '#eeeeee', alignment: 'center' },
-                { text: 'Total Damnificados', bold: true, fillColor: '#eeeeee', alignment: 'center' },
-                { text: 'Total Víctimas', bold: true, fillColor: '#eeeeee', alignment: 'center' },
-                { text: 'Total Pérdidas', bold: true, fillColor: '#eeeeee', alignment: 'center' },
-                { text: 'Monto Total Pérdidas', bold: true, fillColor: '#eeeeee', alignment: 'center' }
-              ],
-              [
-                { text: totalAfectaciones, alignment: 'center' },
-                { text: totalDamnificados, alignment: 'center' },
-                { text: totalVictimas, alignment: 'center' },
-                { text: totalPerdidas, alignment: 'center' },
-                { text: Number(totalMontoPerdidas).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }), alignment: 'center' }
-              ]
-            ]
-          },
-          layout: {
-            hLineWidth: () => 1,
-            vLineWidth: () => 1,
-            hLineColor: () => '#bbb',
-            vLineColor: () => '#bbb',
-            paddingLeft: () => 6,
-            paddingRight: () => 6,
-            paddingTop: () => 4,
-            paddingBottom: () => 4
-          }
-        }
-      ],
-      styles: {
-        membrete: { fontSize: 11, bold: true, margin: [0, 0, 0, 2], font: 'Helvetica' },
-        header: { fontSize: 16, bold: true, alignment: 'center', font: 'Helvetica' }
-      },
-      defaultStyle: {
-        font: 'Helvetica'
-      }
-    };
-
-    const fonts = {
-      Helvetica: {
-        normal: 'Helvetica',
-        bold: 'Helvetica-Bold',
-        italics: 'Helvetica-Oblique',
-        bolditalics: 'Helvetica-BoldOblique'
-      }
-    };
-
-    const printer = new PdfPrinter(fonts);
-    const pdfDoc = printer.createPdfKitDocument(docDefinition);
-    let chunks = [];
-    pdfDoc.on('data', chunk => chunks.push(chunk));
-    pdfDoc.on('end', () => {
-      const pdfBuffer = Buffer.concat(chunks);
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename=resumen_afectaciones.pdf`);
-      res.send(pdfBuffer);
-    });
-    pdfDoc.end();
-
-  } catch (error) {
-    console.error('Error al generar PDF resumen:', error);
-    res.status(500).json({ mensaje: 'Error al generar PDF', error: error.message });
-  }
-};
-
-
-// Listar todos los usuarios con campos relevantes
-export const listarUsuarios = async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT 
-        "TMA_CEDULA" AS cedula,
-        "TMA_NOMBRE" AS nombres,
-        "TMA_APELLI" AS apellidos,
-        "TMA_DIRECC" AS direccion,
-        "TMA_TELEFO" AS telefono,
-        "TMA_CORREO" AS correo,
-        "TMA_USUARI" AS usuario,
-        "TMA_ROLE" AS rol
-      FROM "BDTMA_USUA"
-      ORDER BY "TMA_NOMBRE" ASC
-    `);
-    res.json(result.rows);
-  } catch (error) {
-    console.error('Error al listar usuarios:', error);
-    res.status(500).json({ mensaje: 'Error al listar usuarios', error: error.message });
-  }
-};
-
-// Editar usuario (campos relevantes)
-export const editarUsuario = async (req, res) => {
-  try {
-    const { cedula } = req.params;
-    const { nombres, apellidos, direccion, telefono, correo, usuario, rol } = req.body;
-
-    const result = await pool.query(
-      `UPDATE "BDTMA_USUA"
-       SET "TMA_NOMBRE" = $1,
-           "TMA_APELLI" = $2,
-           "TMA_DIRECC" = $3,
-           "TMA_TELEFO" = $4,
-           "TMA_CORREO" = $5,
-           "TMA_USUARI" = $6,
-           "TMA_ROLE" = $7
-       WHERE "TMA_CEDULA" = $8
-       RETURNING *`,
-      [nombres, apellidos, direccion, telefono, correo, usuario, rol, cedula]
-    );
-
-    if (result.rowCount === 0) {
-      return res.status(404).json({ mensaje: 'Usuario no encontrado' });
-    }
-
-    res.json({ mensaje: 'Usuario actualizado', usuario: result.rows[0] });
-  } catch (error) {
-    console.error('Error al editar usuario:', error);
-    res.status(500).json({ mensaje: 'Error al editar usuario', error: error.message });
-  }
-};
-
-// Eliminar usuario por cédula
-export const eliminarUsuario = async (req, res) => {
-  try {
-    const { cedula } = req.params;
-    const result = await pool.query(
-      `DELETE FROM "BDTMA_USUA" WHERE "TMA_CEDULA" = $1 RETURNING *`,
-      [cedula]
-    );
-    if (result.rowCount === 0) {
-      return res.status(404).json({ mensaje: 'Usuario no encontrado' });
-    }
-    res.json({ mensaje: 'Usuario eliminado correctamente' });
-  } catch (error) {
-    console.error('Error al eliminar usuario:', error);
-    res.status(500).json({ mensaje: 'Error al eliminar usuario', error: error.message });
-  }
-};
+//# sourceMappingURL=usuarios.js.map
