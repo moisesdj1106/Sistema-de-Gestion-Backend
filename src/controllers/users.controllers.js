@@ -100,7 +100,7 @@ export const createUser = async (req, res) => {
           "TMA_CEDULA", "TMA_NOMBRE", "TMA_APELLI", "TMA_DIRECC", "TMA_TELEFO", "TMA_SEXOTP", "TMA_FENACI",
           "TMA_USUARI", "TMA_CONTRA", "TMA_CORREO", "TMA_ROLE", "TMA_CODCOM", "TMA_TIPODO"
        ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+          $1, INITCAP($2), INITCAP($3),INITCAP($4), $5, $6, $7, $8, $9, $10, $11, $12, $13
        ) RETURNING "TMA_CEDULA", "TMA_NOMBRE", "TMA_APELLI", "TMA_DIRECC", "TMA_TELEFO", "TMA_USUARI", "TMA_CORREO", "TMA_ROLE"`,
       [
         cedula,
