@@ -443,7 +443,7 @@ export const crearVictima = async (req, res) => {
         const result = await pool.query(
             `INSERT INTO "BDTTR_VICT" (
                 "TTR_CEDULA", "TTR_TIPODO", "TTR_NOMBRE", "TTR_APELLI", "TTR_COAFEC", "TTR_CERTIF"
-            ) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+            ) VALUES (INITCAP($1), INITCAP($2), $3, $4, $5, $6) RETURNING *`,
             [cedula, tipodo, nombre, apelli, coafec, certif]
         );
         res.status(201).json({ mensaje: "Víctima registrada", victima: result.rows[0] });
@@ -491,7 +491,7 @@ export const editarDamnificado = async (req, res) => {
         const { nombre, apelli, fenaci, contac, coafec, esalud, cedula, tipodo } = req.body;
         const result = await pool.query(
             `UPDATE "BDTTR_DAMN"
-             SET "TTR_NOMBRE"=$1, "TTR_APELLI"=$2, "TTR_FENACI"=$3, "TTR_CONTAC"=$4, "TTR_COAFEC"=$5, "TTR_ESALUD"=$6, "TTR_CEDULA"=$7, "TTR_TIPODO"=$8
+             SET "TTR_NOMBRE"=INITCAP($1), "TTR_APELLI"=INITCAP($2), "TTR_FENACI"=$3, "TTR_CONTAC"=$4, "TTR_COAFEC"=$5, "TTR_ESALUD"=$6, "TTR_CEDULA"=$7, "TTR_TIPODO"=$8
              WHERE "TTR_CODAMN"=$9 RETURNING *`,
             [nombre, apelli, fenaci, contac, coafec, esalud, cedula, tipodo, id]
         );
@@ -556,7 +556,7 @@ export const editarVictima = async (req, res) => {
         const { cedula, tipodo, nombre, apelli, coafec, certif } = req.body;
         const result = await pool.query(
             `UPDATE "BDTTR_VICT"
-             SET "TTR_CEDULA"=$1, "TTR_TIPODO"=$2, "TTR_NOMBRE"=$3, "TTR_APELLI"=$4, "TTR_COAFEC"=$5, "TTR_CERTIF"=$6
+             SET "TTR_CEDULA"=$1, "TTR_TIPODO"=$2, "TTR_NOMBRE"=INITCAP($3), "TTR_APELLI"=INITCAP($4), "TTR_COAFEC"=$5, "TTR_CERTIF"=$6
              WHERE "TTR_COVICT"=$7 RETURNING *`,
             [cedula, tipodo, nombre, apelli, coafec, certif, id]
         );
