@@ -1375,7 +1375,7 @@ export const generarPdfAfectacion = async (req, res) => {
               ]
             },
             {
-              image: 'src/assets/logocivil.jpeg',
+              image: 'src/assets/gobierno.png',
               width: 71,
               height: 70,   
               alignment: 'right',
