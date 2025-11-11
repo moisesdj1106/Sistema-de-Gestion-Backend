@@ -203,7 +203,7 @@ export const crearNoticia = async (req, res) => {
         const result = await pool.query(
             `INSERT INTO "BDTTR_NOTI" (
                 "TTR_TITULO", "TTR_DESCRI", "TTR_FEPUBL", "TTR_FUENTE", "TTR_CODESA", "TTR_IMAGEN"
-            ) VALUES ($1, $2, NOW(), $3, $4, $5) RETURNING *`,
+            ) VALUES (UPPER($1), $2, NOW(), $3, $4, $5) RETURNING *`,
             [titulo, descripcion, fuente, codesa, imagenBuffer]
         );
 
