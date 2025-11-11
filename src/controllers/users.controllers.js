@@ -1667,7 +1667,7 @@ export const generarPdfResumenAfectacionesPorFecha = async (req, res) => {
               ]
             },
             {
-              image: 'src/assets/logocivil.jpeg',
+              image: 'src/assets/gobierno.png',
               width: 80,
               height: 75, 
               alignment: 'right',
