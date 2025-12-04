@@ -18,6 +18,75 @@ export const getTipoDocumentos = async (req, res) => {
 };
 
 // Crear usuario
+// ...existing code...// ...existing code...
+// ...existing code...
+export const checkExistence = async (req, res) => {
+  try {
+    const rawTipo = String(req.query.tipo || '').trim();
+    const tipo = rawTipo.toUpperCase();
+    const documento = String(req.query.documento || '').trim();
+    if (!documento) return res.status(400).json({ exists: false, mensaje: 'Documento requerido' });
+
+    // Detectar pasaporte (lado cliente puede enviar 'P' o '3')
+    const isPassport = tipo === 'P' || tipo === '3' || tipo === '03';
+
+    // Validación básica según tipo (si se proporcionó tipo)
+    if (rawTipo) {
+      if (isPassport) {
+        if (!/^[A-Za-z0-9\-]{1,20}$/.test(documento)) {
+          return res.status(400).json({ exists: false, mensaje: 'Formato de pasaporte inválido' });
+        }
+      } else {
+        if (!/^\d{7,9}$/.test(documento)) {
+          return res.status(400).json({ exists: false, mensaje: 'Documento inválido (solo dígitos, 7-9)' });
+        }
+      }
+    } else {
+      // Si no hay tipo, validar al menos formato dígitos largo típico o alfanumérico corto
+      if (!/^[A-Za-z0-9\-]{1,20}$/.test(documento) && !/^\d{7,9}$/.test(documento)) {
+        return res.status(400).json({ exists: false, mensaje: 'Documento con formato inválido' });
+      }
+    }
+
+    // Si se envió tipo, buscar coincidencia exacta en número + tipo.
+    // Para cubrir variantes (por ejemplo cliente envia '3' y DB guarda 'P'), generamos opciones.
+    let result;
+    if (rawTipo) {
+      const tipoOpciones = [tipo];
+      if (tipo === '3' || tipo === '03') tipoOpciones.push('P');
+      if (tipo === 'P') tipoOpciones.push('3');
+      const uniqTipos = Array.from(new Set(tipoOpciones)).map(String);
+
+      // Important: casteamos el campo TMA_TIPODO a text para evitar errores de comparación entre integer/text
+      const q = `SELECT "TMA_CEDULA","TMA_TIPODO","TMA_USUARI","TMA_CORREO"
+                 FROM "BDTMA_USUA"
+                 WHERE "TMA_CEDULA" = $1
+                   AND "TMA_TIPODO"::text = ANY($2::text[])
+                 LIMIT 1`;
+      result = await pool.query(q, [documento, uniqTipos]);
+    } else {
+      // si no hay tipo, buscar cualquier registro con ese número
+      const q = `SELECT "TMA_CEDULA","TMA_TIPODO","TMA_USUARI","TMA_CORREO"
+                 FROM "BDTMA_USUA"
+                 WHERE "TMA_CEDULA" = $1
+                 LIMIT 1`;
+      result = await pool.query(q, [documento]);
+    }
+
+    if (result.rows.length > 0) {
+      return res.status(200).json({ exists: true, mensaje: 'Registro existente', dato: result.rows[0] });
+    }
+    return res.status(200).json({ exists: false, mensaje: 'No existe' });
+  } catch (error) {
+    console.error('checkExistence error:', error);
+    return res.status(500).json({ exists: false, mensaje: 'Error al verificar existencia' });
+  }
+};
+// ...existing code...
+
+// ...existing code...
+
+// Crear usuario// ...existing code...
 export const createUser = async (req, res) => {
   try {
     const data = req.body || {};
@@ -44,14 +113,30 @@ export const createUser = async (req, res) => {
     const digitsRegex = /^\d+$/;
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-    // Validaciones
-    if (!cedula) errors.push('Cédula es obligatoria');
-    else if (!digitsRegex.test(cedula)) errors.push('Cédula inválida (solo dígitos)');
+    const tipodoNorm = String(tipodo || '').toUpperCase();
 
+    // Validaciones para documento según tipo
+    if (!cedula) {
+      errors.push('Documento es obligatorio');
+    } else {
+      if (tipodoNorm === 'P') {
+        // Pasaporte: permitir alfanumérico y guion, longitud razonable
+        if (!/^[A-Za-z0-9\-]{3,7}$/.test(cedula)) {
+          errors.push('Pasaporte inválido (3-20 caracteres, letras, números o guión)');
+        }
+      } else if (tipodoNorm === 'V' || tipodoNorm === 'E' ) {
+        // Otros: solo dígitos 7-9
+        if (!/^\d{7,9}$/.test(cedula)) {
+          errors.push('Documento inválido (solo dígitos, 7-9 caracteres)');
+        }
+      }
+    }
+
+    // Validaciones resto de campos
     if (!nombres) errors.push('Nombres son obligatorios');
-    else if (!nameRegex.test(nombres)) errors.push('Nombres inválidos solo letras (solo letras, espacios,)');
+    else if (!nameRegex.test(nombres)) errors.push('Nombres inválidos (solo letras, espacios, - y \')');
 
-    if (apellidos && !nameRegex.test(apellidos)) errors.push('Apellidos inválidos solo letras (solo letras, espacios, - y \')');
+    if (apellidos && !nameRegex.test(apellidos)) errors.push('Apellidos inválidos (solo letras, espacios, - y \')');
 
     if (!usuario) errors.push('Usuario es obligatorio');
 
@@ -76,16 +161,16 @@ export const createUser = async (req, res) => {
       return res.status(400).json({ codigo: 'VALIDATION_ERROR', errores: errors });
     }
 
-    // Pre-check en BD para cédula, usuario o correo existentes
+    // Pre-check en BD para documento, usuario o correo existentes
     const conflict = await pool.query(
       `SELECT "TMA_CEDULA", "TMA_USUARI", "TMA_CORREO" FROM "BDTMA_USUA"
-       WHERE "TMA_CEDULA" = $1 OR "TMA_USUARI" = $2 OR "TMA_CORREO" = $3 LIMIT 1`,
+       WHERE "TMA_CEDULA" = $1 OR "TMA_USUARI" = $2 OR LOWER("TMA_CORREO") = LOWER($3) LIMIT 1`,
       [cedula, usuario, email]
     );
     if (conflict.rows.length > 0) {
       const row = conflict.rows[0];
       const detalles = [];
-      if (row.TMA_CEDULA && String(row.TMA_CEDULA) === cedula) detalles.push('Cédula ya registrada');
+      if (row.TMA_CEDULA && String(row.TMA_CEDULA) === cedula) detalles.push('Documento ya registrado');
       if (row.TMA_USUARI && String(row.TMA_USUARI) === usuario) detalles.push('Usuario ya existe');
       if (row.TMA_CORREO && String(row.TMA_CORREO).toLowerCase() === email) detalles.push('Correo ya registrado');
       return res.status(409).json({ codigo: 'CONFLICT', mensaje: 'Conflicto de datos', detalles });
@@ -100,7 +185,7 @@ export const createUser = async (req, res) => {
           "TMA_CEDULA", "TMA_NOMBRE", "TMA_APELLI", "TMA_DIRECC", "TMA_TELEFO", "TMA_SEXOTP", "TMA_FENACI",
           "TMA_USUARI", "TMA_CONTRA", "TMA_CORREO", "TMA_ROLE", "TMA_CODCOM", "TMA_TIPODO"
        ) VALUES (
-          $1, INITCAP($2), INITCAP($3),INITCAP($4), $5, $6, $7, $8, $9, $10, $11, $12, $13
+          $1, INITCAP($2), INITCAP($3), INITCAP($4), $5, $6, $7, $8, $9, $10, $11, $12, $13
        ) RETURNING "TMA_CEDULA", "TMA_NOMBRE", "TMA_APELLI", "TMA_DIRECC", "TMA_TELEFO", "TMA_USUARI", "TMA_CORREO", "TMA_ROLE"`,
       [
         cedula,
@@ -129,6 +214,7 @@ export const createUser = async (req, res) => {
     return res.status(500).json({ codigo: 'INTERNAL_ERROR', message: "Error al crear el usuario" });
   }
 };
+
 
 // Validar usuario (login)
 export const validarUsuario = async (req, res) => {
@@ -409,6 +495,8 @@ export const crearDamnificado = async (req, res) => {
             if (damnificado.rows.length > 0) {
                 return res.status(400).json({ mensaje: "Ya existe un damnificado con esa cédula en esta afectación." });
             }
+            
+            
         }
 
         const result = await pool.query(
@@ -425,26 +513,34 @@ export const crearDamnificado = async (req, res) => {
 };
 
 // Registrar víctima (con apellido)
+// ...existing code...
 export const crearVictima = async (req, res) => {
     try {
         const { cedula, tipodo, nombre, apelli, coafec, certif } = req.body;
-        if (!cedula || !tipodo || !nombre || !apelli || !coafec) {
+        if (!cedula || tipodo === undefined || tipodo === null || !nombre || !apelli || !coafec) {
             return res.status(400).json({ mensaje: "Faltan campos obligatorios" });
         }
+
+        // Asegurar que tipodo sea entero (la columna es integer)
+        const tipodoInt = Number.isInteger(Number(tipodo)) ? parseInt(tipodo, 10) : null;
+        if (tipodoInt === null) {
+            return res.status(400).json({ mensaje: "Tipo de documento inválido (debe ser numérico)" });
+        }
+
         // Validar que no exista ya como víctima en la misma afectación
         const victima = await pool.query(
             `SELECT 1 FROM "BDTTR_VICT" WHERE "TTR_CEDULA" = $1 AND "TTR_COAFEC" = $2 LIMIT 1`,
             [cedula, coafec]
         );
         if (victima.rows.length > 0) {
-            return res.status(400).json({ mensaje: "Ya existe una víctima con esa cédula en esta afectación." });
+            return res.status(400).json({ mensaje: "Ya existe una víctima con ese n° de documento en esta afectación." });
         }
-        
+
         const result = await pool.query(
             `INSERT INTO "BDTTR_VICT" (
                 "TTR_CEDULA", "TTR_TIPODO", "TTR_NOMBRE", "TTR_APELLI", "TTR_COAFEC", "TTR_CERTIF"
-            ) VALUES (INITCAP($1), INITCAP($2), $3, $4, $5, $6) RETURNING *`,
-            [cedula, tipodo, nombre, apelli, coafec, certif]
+            ) VALUES ($1, $2, INITCAP($3), INITCAP($4), $5, $6) RETURNING *`,
+            [cedula, tipodoInt, nombre, apelli, coafec, certif]
         );
         res.status(201).json({ mensaje: "Víctima registrada", victima: result.rows[0] });
     } catch (error) {
@@ -453,8 +549,6 @@ export const crearVictima = async (req, res) => {
     }
 };
 
-/// crud damnificados y victimas 
-// Listar damnificados con búsqueda y paginación
 export const listarDamnificados = async (req, res) => {
     try {
         const { page = 1, search = "" } = req.query;
@@ -619,27 +713,33 @@ export const getTiposPerdida = async (req, res) => {
     }
 };
 
-// Registrar varias pérdidas (con datos personales)
+// Registrar varias pérdidas (con datos personales)// ...existing code...
 export const crearPerdidas = async (req, res) => {
     try {
         const { coafec, perdidas, coddoc, cedula, nombre, apelli } = req.body;
         if (!coafec || !coddoc || !cedula || !nombre || !apelli || !Array.isArray(perdidas) || perdidas.length === 0) {
             return res.status(400).json({ mensaje: "Faltan campos obligatorios" });
         }
-        // Validar cada pérdida
+        // Validar cada pérdida (ahora aceptamos descri opcional)
         for (const p of perdidas) {
-            if (!p.cotipo || !p.vaesti) {
+            if (!p.cotipo || (p.vaesti === undefined || p.vaesti === null)) {
                 return res.status(400).json({ mensaje: "Faltan datos en una de las pérdidas" });
             }
+            // normalizar descripción si existe
+            if (p.descri && typeof p.descri !== 'string') {
+                return res.status(400).json({ mensaje: "Descripción de pérdida inválida" });
+            }
         }
-        // Insertar cada pérdida
+        // Insertar cada pérdida incluyendo TTR_DESCRI
         const results = [];
         for (const p of perdidas) {
+            const descri = p.descri ? String(p.descri).trim() : null;
             const result = await pool.query(
                 `INSERT INTO "BDTTR_PERD" (
-                    "TTR_COAFEC", "TTR_COTIPO", "TTR_VAESTI", "TTR_CODDOC", "TTR_CEDULA", "TTR_NOMBRE", "TTR_APELLI"
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-                [coafec, p.cotipo, p.vaesti, coddoc, cedula, nombre, apelli]
+                    "TTR_COAFEC", "TTR_COTIPO", "TTR_VAESTI", "TTR_CODDOC",
+                    "TTR_CEDULA", "TTR_NOMBRE", "TTR_APELLI", "TTR_DESCRI"
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+                [coafec, p.cotipo, p.vaesti, coddoc, cedula, nombre, apelli, descri]
             );
             results.push(result.rows[0]);
         }
@@ -649,6 +749,7 @@ export const crearPerdidas = async (req, res) => {
         res.status(500).json({ mensaje: "Error al registrar pérdidas", error: error.message });
     }
 };
+// ...existing code...
 
 // Listar tipos de documento
 export const getTiposDocument = async (req, res) => {
@@ -846,7 +947,7 @@ export const registrarDonante = async (req, res) => {
 
     // Validaciones
     if (!cedula) errors.push('Cédula es obligatoria');
-    else if (!digitsRegex.test(cedula)) errors.push('Cédula inválida (solo dígitos)');
+    /*else if (!digitsRegex.test(cedula)) errors.push('Cédula inválida (solo dígitos)');*/
     // opcional: longitud mínima/ máxima de cédula
     // if (cedula.length < 6) errors.push('Cédula demasiado corta');
 
@@ -1011,25 +1112,55 @@ export const eliminarDonacion = async (req, res) => {
 };
 
 
-// Editar donante
+// ...existing code...
 export const editarDonante = async (req, res) => {
     try {
         const { id } = req.params;
         const { nombre, contac, tipodn, cedula, coddoc } = req.body;
+
+        // Normalizar valores entrantes
+        const cedulaStr = cedula === null || cedula === undefined ? null : String(cedula).trim();
+        const coddocStr = coddoc === null || coddoc === undefined ? '' : String(coddoc).trim().toUpperCase();
+
+        // Detectar pasaporte (acepta letras, números y guion)
+        const isPassport = ['P', '3', '03'].includes(coddocStr);
+
+        // Validar cedula según tipo de documento
+        if (cedulaStr) {
+            if (isPassport) {
+                if (!/^[A-Za-z0-9-]{3,20}$/.test(cedulaStr)) {
+                    return res.status(400).json({ mensaje: "Documento inválido para pasaporte (letras, números y guión, 3-20 caracteres)" });
+                }
+            } else {
+                if (!/^\d{3,20}$/.test(cedulaStr)) {
+                    return res.status(400).json({ mensaje: "Cédula inválida: solo dígitos permitidos" });
+                }
+            }
+        }
+
+        // tipodn: si la columna en BD es integer, convertir; si no, pasar tal cual
+        const tipodnInt = (tipodn === null || tipodn === undefined) ? null : (Number.isInteger(Number(tipodn)) ? parseInt(tipodn, 10) : tipodn);
+
         const result = await pool.query(
             `UPDATE "BDTMA_DONT"
-             SET "TMA_NOMBRE"=$1, "TMA_CONTAC"=$2, "TMA_TIPODN"=$3, "TMA_CEDULA"=$4, "TMA_CODDOC"=$5
-             WHERE "TMA_CODONT"=$6 RETURNING *`,
-            [nombre, contac, tipodn, cedula, coddoc, id]
+             SET "TMA_NOMBRE" = $1,
+                 "TMA_CONTAC" = $2,
+                 "TMA_TIPODN" = $3,
+                 "TMA_CEDULA" = $4,
+                 "TMA_CODDOC" = $5
+             WHERE "TMA_CODONT" = $6
+             RETURNING *`,
+            [nombre, contac, tipodnInt, cedulaStr, coddocStr || null, id]
         );
+
         if (result.rowCount === 0) return res.status(404).json({ mensaje: "No encontrado" });
         res.json({ mensaje: "Donante actualizado", donante: result.rows[0] });
     } catch (error) {
         console.error("Error al editar donante:", error);
-        res.status(500).json({ mensaje: "Error al editar donante" });
+        res.status(500).json({ mensaje: "Error al editar donante", error: error.message });
     }
 };
-
+// ...existing code...
 // Eliminar donante
 export const eliminarDonante = async (req, res) => {
     try {
@@ -1310,7 +1441,7 @@ export const eliminarAfectacion = async (req, res) => {
     res.status(500).json({ mensaje: 'Error al eliminar afectación', error: error.message });
   }
 };
-
+// ...existing code...
 export const generarPdfAfectacion = async (req, res) => {
   const { id } = req.params;
   try {
@@ -1344,17 +1475,22 @@ export const generarPdfAfectacion = async (req, res) => {
       [id]
     );
 
-    // 4. Pérdidas
+    // 4. Pérdidas (incluye la descripción TTR_DESCRI)
     const perdidasResult = await pool.query(
-      `SELECT p."TTR_NOMBRE", p."TTR_APELLI", p."TTR_CEDULA", t."TTR_NOMBRE" as tipo_perdida, p."TTR_VAESTI"
+      `SELECT p."TTR_NOMBRE", p."TTR_APELLI", p."TTR_CEDULA",
+              t."TTR_NOMBRE" as tipo_perdida,
+              p."TTR_VAESTI",
+              p."TTR_DESCRI"
        FROM "BDTTR_PERD" p
        JOIN "BDTTR_TIPE" t ON p."TTR_COTIPO" = t."TTR_COTIPO"
        WHERE p."TTR_COAFEC" = $1`,
       [id]
     );
 
-    // 5. Construir el documento PDF
+    // 5. Construir el documento PDF en horizontal y con fuente más pequeña para la descripción
     const docDefinition = {
+      pageOrientation: 'landscape',
+      pageMargins: [20, 20, 20, 20],
       content: [
         // Membrete con espacio para logos
         {
@@ -1362,9 +1498,8 @@ export const generarPdfAfectacion = async (req, res) => {
             {
               image: 'src/assets/logodesastres-removebg-preview.png',
               width: 73,
-              height: 70,   
-              alignment: 'left',
-              margin: [0, 0, 0, 0]
+              height: 70,
+              alignment: 'left'
             },
             {
               stack: [
@@ -1377,19 +1512,19 @@ export const generarPdfAfectacion = async (req, res) => {
             {
               image: 'src/assets/gobierno.png',
               width: 71,
-              height: 70,   
-              alignment: 'right',
-              margin: [0, 5, 0, 0]
+              height: 70,
+              alignment: 'right'
             }
           ],
-          margin: [0, 0, 0, 10]
+          margin: [0, 0, 0, 8]
         },
-        // Encabezado principal
-        { text: `REPORTE DE AFECTACIÓN`, style: 'header', alignment: 'center', margin: [0, 0, 0, 10] },
-        // Datos de la afectación en tabla
+
+        { text: `REPORTE DE AFECTACIÓN`, style: 'header', alignment: 'center', margin: [0, 0, 0, 8] },
+
+        // Datos de la afectación
         {
           table: {
-            widths: ['auto', '*', 'auto', '*'],
+            widths: ['auto', '*', 'auto', 120],
             body: [
               [
                 { text: 'Comunidad:', bold: true, fillColor: '#eeeeee', alignment: 'right' },
@@ -1404,7 +1539,7 @@ export const generarPdfAfectacion = async (req, res) => {
             ]
           },
           layout: {
-            fillColor: (rowIndex, node, columnIndex) => rowIndex === 0 ? '#f5f5f5' : null,
+            fillColor: (rowIndex) => rowIndex === 0 ? '#f5f5f5' : null,
             hLineWidth: () => 1,
             vLineWidth: () => 1,
             hLineColor: () => '#bbb',
@@ -1414,17 +1549,17 @@ export const generarPdfAfectacion = async (req, res) => {
             paddingTop: () => 4,
             paddingBottom: () => 4
           },
-          margin: [0, 0, 0, 15]
+          margin: [0, 0, 0, 12]
         },
 
         // Damnificados
-        { text: 'Damnificados', style: 'subheader', margin: [0, 10, 0, 4] },
+        { text: 'Damnificados', style: 'subheader', margin: [0, 6, 0, 6] },
         damnificadosResult.rows.length === 0
-          ? { text: 'No hay damnificados registrados.', italics: true, margin: [0, 0, 0, 10] }
+          ? { text: 'No hay damnificados registrados.', italics: true, margin: [0, 0, 0, 8] }
           : {
               table: {
                 headerRows: 1,
-                widths: ['auto', '*', '*', '*', '*', '*'],
+                widths: ['auto', 150, 150, 90, 110, 90],
                 body: [
                   [
                     { text: 'Cédula', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
@@ -1454,20 +1589,20 @@ export const generarPdfAfectacion = async (req, res) => {
                 paddingTop: () => 4,
                 paddingBottom: () => 4
               },
-              margin: [0, 0, 0, 15]
+              margin: [0, 0, 0, 12]
             },
 
-        // Víctim
-        { text: 'Víctimas', style: 'subheader', margin: [0, 10, 0, 4] },
+        // Víctimas
+        { text: 'Víctimas', style: 'subheader', margin: [0, 6, 0, 6] },
         victimasResult.rows.length === 0
-          ? { text: 'No hay víctimas registradas.', italics: true, margin: [0, 0, 0, 10] }
+          ? { text: 'No hay víctimas registradas.', italics: true, margin: [0, 0, 0, 8] }
           : {
               table: {
                 headerRows: 1,
-                widths: ['auto', '*', '*', '*'],
+                widths: ['auto', 170, 170, '*'],
                 body: [
                   [
-                    { text: 'Cédula', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
+                    { text: 'N°Doc', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
                     { text: 'Nombre', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
                     { text: 'Apellido', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
                     { text: 'N° Certificado', bold: true, fillColor: '#e3e3e3', alignment: 'center' }
@@ -1490,23 +1625,25 @@ export const generarPdfAfectacion = async (req, res) => {
                 paddingTop: () => 4,
                 paddingBottom: () => 4
               },
-              margin: [0, 0, 0, 15]
+              margin: [0, 0, 0, 12]
             },
 
-        // Pérdidas
-        { text: 'Pérdidas', style: 'subheader', margin: [0, 10, 0, 4] },
+        // Pérdidas con descripción amplia (horizontal)
+        { text: 'Pérdidas', style: 'subheader', margin: [0, 6, 0, 6] },
         perdidasResult.rows.length === 0
           ? { text: 'No hay pérdidas registradas.', italics: true }
           : {
               table: {
                 headerRows: 1,
-                widths: ['auto', '*', '*', '*', 'auto'],
+                // dar espacio amplio a la columna de descripción
+                widths: ['auto', 140, 140, 140, '*', 90],
                 body: [
                   [
                     { text: 'Cédula', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
                     { text: 'Nombre', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
                     { text: 'Apellido', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
                     { text: 'Tipo', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
+                    { text: 'Descripción', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
                     { text: 'Valor', bold: true, fillColor: '#e3e3e3', alignment: 'center' }
                   ],
                   ...perdidasResult.rows.map(p => [
@@ -1514,7 +1651,9 @@ export const generarPdfAfectacion = async (req, res) => {
                     { text: p.TTR_NOMBRE, alignment: 'center' },
                     { text: p.TTR_APELLI, alignment: 'center' },
                     { text: p.tipo_perdida, alignment: 'center' },
-                    { text: p.TTR_VAESTI, alignment: 'center' }
+                    // aplicar fuente pequeña y permitir salto de línea dentro de la celda
+                    { text: p.TTR_DESCRI ? String(p.TTR_DESCRI).trim() : '-', alignment: 'center', fontSize: 9, margin: [0, 2, 0, 2] },
+                    { text: p.TTR_VAESTI != null ? Number(p.TTR_VAESTI).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-', alignment: 'center' }
                   ])
                 ]
               },
@@ -1530,22 +1669,18 @@ export const generarPdfAfectacion = async (req, res) => {
               }
             }
       ],
-      images: {
-        // Puedes poner aquí la ruta base64 de tus logos o dejarlo vacío para luego agregarlo
-        logoIzquierdo: '', // Ejemplo: 'data:image/png;base64,...'
-        logoDerecho: ''    // Ejemplo: 'data:image/png;base64,...'
-      },
       styles: {
-        membrete: { fontSize: 11, bold: true, margin: [0, 0, 0, 2], font: 'Helvetica' },
-        header: { fontSize: 16, bold: true, alignment: 'center', font: 'Helvetica' },
-        subheader: { fontSize: 13, bold: true, margin: [0, 10, 0, 4], font: 'Helvetica' }
+        membrete: { fontSize: 10, bold: true, margin: [0, 0, 0, 2], font: 'Helvetica' },
+        header: { fontSize: 14, bold: true, alignment: 'center', font: 'Helvetica' },
+        subheader: { fontSize: 12, bold: true, margin: [0, 6, 0, 6], font: 'Helvetica' }
       },
       defaultStyle: {
-        font: 'Helvetica'
+        font: 'Helvetica',
+        fontSize: 10
       }
     };
 
-    // 6. Generar y enviar el PDF usando fuentes estándar
+    // 6. Generar y enviar el PDF
     const fonts = {
       Helvetica: {
         normal: 'Helvetica',
@@ -1572,6 +1707,7 @@ export const generarPdfAfectacion = async (req, res) => {
     res.status(500).json({ mensaje: 'Error al generar PDF', error: error.message });
   }
 };
+// ...existing code...
 
 
 export const listarAfectacionesResumenPorFecha = async (req, res) => {

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import {  validarUsuario, getTipoDocumentos, getComunidades, crearNoticia, obtenerNoticias, getDesastres, createUser, getComunidad, getParroquias, crearComunidad, editarComunidad, eliminarComunidad, crearAfectacion, getComunidadesNombres, getDesastresNombres, getAfectaciones, crearDamnificado, crearVictima, listarDamnificados, editarDamnificado, eliminarDamnificado, listarVictimas, editarVictima, eliminarVictima, getZonasAfectadas, getTiposPerdida, crearPerdidas, getTiposDocument, listarPerdidas, editarPerdida, eliminarPerdida, getDashboardData, registrarDonante, getTiposDonante, registrarDonacion, listarDonantes, getTiposEstiloDonacion, listarDonaciones, editarDonacion, eliminarDonacion, editarDonante, eliminarDonante, listarDonantesFull, eliminarNoticia, solicitarRecuperacion, restablecerContrasena, listarPaises, listarEstadosPorPais, listarMunicipiosPorEstado, listarParroquiasPorMunicipio, listarComunidadesPorParroquia, listarAfectaciones, editarAfectacion, eliminarAfectacion, obtenerUltimaAfectacion, generarPdfAfectacion, listarAfectacionesResumenPorFecha, generarPdfResumenAfectacionesPorFecha, listarUsuarios, editarUsuario, eliminarUsuario } from "../controllers/users.controllers.js";
+import {  validarUsuario, getTipoDocumentos, getComunidades, crearNoticia, obtenerNoticias, getDesastres, createUser, getComunidad, getParroquias, crearComunidad, editarComunidad, eliminarComunidad, crearAfectacion, getComunidadesNombres, getDesastresNombres, getAfectaciones, crearDamnificado, crearVictima, listarDamnificados, editarDamnificado, eliminarDamnificado, listarVictimas, editarVictima, eliminarVictima, getZonasAfectadas, getTiposPerdida, crearPerdidas, getTiposDocument, listarPerdidas, editarPerdida, eliminarPerdida, getDashboardData, registrarDonante, getTiposDonante, registrarDonacion, listarDonantes, getTiposEstiloDonacion, listarDonaciones, editarDonacion, eliminarDonacion, editarDonante, eliminarDonante, listarDonantesFull, eliminarNoticia, solicitarRecuperacion, restablecerContrasena, listarPaises, listarEstadosPorPais, listarMunicipiosPorEstado, listarParroquiasPorMunicipio, listarComunidadesPorParroquia, listarAfectaciones, editarAfectacion, eliminarAfectacion, obtenerUltimaAfectacion, generarPdfAfectacion, listarAfectacionesResumenPorFecha, generarPdfResumenAfectacionesPorFecha, listarUsuarios, editarUsuario, eliminarUsuario, checkExistence } from "../controllers/users.controllers.js";
 
 const router = Router();
 
@@ -100,7 +100,7 @@ router.get('/estados/:codpais', listarEstadosPorPais);
 router.get('/municipios/:coesta', listarMunicipiosPorEstado);
 router.get('/parroquias/:comuni', listarParroquiasPorMunicipio);
 router.get('/comunidades/:coparr', listarComunidadesPorParroquia);
-
+router.get('/existe', checkExistence);
 
 // Ejemplo en tu archivo de rutas
 router.get('/afectaciones/ultima', obtenerUltimaAfectacion);
