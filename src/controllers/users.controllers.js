@@ -1221,17 +1221,13 @@ export const eliminarNoticia = async (req, res) => {
 // Recuperación de contraseña
 
 
+// Transporte global
 const transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com', // Servidor SMTP de Google
-    port: 465, // Puerto estándar para SSL
-    secure: true, // Usa SSL
+    service: 'gmail',
     auth: {
         user: 'gestion.desastres2025@gmail.com',
-        pass: 'zvfx ripj vqzx xnyf' // La contraseña de aplicación
+        pass: 'zvfx ripj vqzx xnyf'
     }
-    // Puedes agregar un timeout explícito para hacer debugging:
-    // connectionTimeout: 10000, // 10 segundos
-    // socketTimeout: 10000 // 10 segundos
 });
 
 // Solicitar recuperación
