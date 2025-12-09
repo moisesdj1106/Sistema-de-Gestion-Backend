@@ -17,9 +17,7 @@ export const getTipoDocumentos = async (req, res) => {
     }
 };
 
-// Crear usuario
-// ...existing code...// ...existing code...
-// ...existing code...
+
 export const checkExistence = async (req, res) => {
   try {
     const rawTipo = String(req.query.tipo || '').trim();
@@ -1223,13 +1221,17 @@ export const eliminarNoticia = async (req, res) => {
 // Recuperación de contraseña
 
 
-// Transporte global
 const transporter = nodemailer.createTransport({
-    service: 'gmail',
+    host: 'smtp.gmail.com', // Servidor SMTP de Google
+    port: 465, // Puerto estándar para SSL
+    secure: true, // Usa SSL
     auth: {
         user: 'gestion.desastres2025@gmail.com',
-        pass: 'zvfx ripj vqzx xnyf'
+        pass: 'zvfx ripj vqzx xnyf' // La contraseña de aplicación
     }
+    // Puedes agregar un timeout explícito para hacer debugging:
+    // connectionTimeout: 10000, // 10 segundos
+    // socketTimeout: 10000 // 10 segundos
 });
 
 // Solicitar recuperación
