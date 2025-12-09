@@ -80,9 +80,11 @@ export const checkExistence = async (req, res) => {
     return res.status(500).json({ exists: false, mensaje: 'Error al verificar existencia' });
   }
 };
+// ...existing code...
 
+// ...existing code...
 
-// Crear usuario// 
+// Crear usuario// ...existing code...
 export const createUser = async (req, res) => {
   try {
     const data = req.body || {};
@@ -1219,21 +1221,16 @@ export const eliminarNoticia = async (req, res) => {
 // Recuperación de contraseña
 
 
-// Transporte global (usar env vars y timeouts)
+// Transporte global
 const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: Number(process.env.SMTP_PORT || 587),
-    secure: (process.env.SMTP_SECURE === 'true') || false, // true para 465
+    service: 'gmail',
     auth: {
-        user: process.env.SMTP_USER || 'gestion.desastres2025@gmail.com',
-        pass: process.env.SMTP_PASS || 'zvfx ripj vqzx xnyf'
-    },
-    connectionTimeout: Number(process.env.SMTP_CONN_TIMEOUT || 20000), // 20s
-    greetingTimeout: Number(process.env.SMTP_GREETING_TIMEOUT || 20000),
-    socketTimeout: Number(process.env.SMTP_SOCKET_TIMEOUT || 20000)
+        user: 'gestion.desastres2025@gmail.com',
+        pass: 'zvfx ripj vqzx xnyf'
+    }
 });
 
-// Solicitar recuperación (manejo de errores de envío)
+// Solicitar recuperación
 export const solicitarRecuperacion = async (req, res) => {
     const { email } = req.body;
     try {
@@ -1251,29 +1248,22 @@ export const solicitarRecuperacion = async (req, res) => {
             [token, expiracion, email]
         );
 
-        const enlace = `${process.env.FRONTEND_URL || 'https://sistema-de-gestion-desastres.netlify.app'}/restablecer/${token}`;
+        const enlace = `https://sistema-de-gestion-desastres.netlify.app/restablecer/${token}`;
 
-        // Intentar enviar correo con manejo de errores claro
-        try {
-            await transporter.sendMail({
-                from: `"Soporte" <${process.env.SMTP_USER || 'gestion.desastres2025@gmail.com'}>`,
-                to: email,
-                subject: "Recuperación de acceso",
-                html: `<p>Hola tu nombre de usuario es: ${usuario.TMA_USUARI || ''},</p>
-                       <p>Haz clic en el siguiente enlace para restablecer tu contraseña:</p>
-                       <a href="${enlace}">${enlace}</a>
-                       <p>Este enlace expirará en 1 hora.</p>`
-            });
-            return res.json({ mensaje: "Correo de recuperación enviado" });
-        } catch (mailErr) {
-            console.error('Mail send error:', mailErr);
-            // Si el envío falla por timeout o bloqueo, devolver error claro al cliente
-            return res.status(500).json({ mensaje: "No se pudo enviar el correo de recuperación (problema de conexión al proveedor SMTP)", error: mailErr.message });
-        }
+        await transporter.sendMail({
+            from: '"Soporte" <gestion.desastres2025@gmail.com>',
+            to: email,
+            subject: "Recuperación de acceso",
+            html: `<p>Hola tu nombre de usuario es: ${usuario.TMA_USUARI || ''},</p>
+                   <p>Haz clic en el siguiente enlace para restablecer tu contraseña:</p>
+                   <a href="${enlace}">${enlace}</a>
+                   <p>Este enlace expirará en 1 hora.</p>`
+        });
 
+        res.json({ mensaje: "Correo de recuperación enviado" });
     } catch (error) {
-        console.error('solicitarRecuperacion error:', error);
-        return res.status(500).json({ mensaje: "Error procesando la solicitud de recuperación", error: error.message });
+        console.error(error);
+        res.status(500).json({ mensaje: "Error enviando correo de recuperación", error: error.message });
     }
 };
 
@@ -2020,3 +2010,44 @@ export const eliminarUsuario = async (req, res) => {
     res.status(500).json({ mensaje: 'Error al eliminar usuario', error: error.message });
   }
 };
+
+
+
+
+//////////// 
+
+// ...existing code...
+
+// Verificar identidad (cedula + fecha de nacimiento) y generar token temporal
+export const verificarIdentidad = async (req, res) => {
+  try {
+    const { cedula, fecha_nac } = req.body;
+    if (!cedula || !fecha_nac) {
+      return res.status(400).json({ mensaje: "Faltan datos: cedula y fecha_nac son obligatorios" });
+    }
+
+    // Busca usuario por cédula y fecha de nacimiento (comparación por DATE)
+    const q = `SELECT "TMA_CEDULA", "TMA_USUARI" FROM "BDTMA_USUA"
+               WHERE "TMA_CEDULA" = $1 AND DATE("TMA_FENACI") = $2::date LIMIT 1`;
+    const result = await pool.query(q, [String(cedula).trim(), fecha_nac]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ mensaje: "No se encontró usuario con esos datos" });
+    }
+
+    // Generar token temporal y expiración (15 min)
+    const token = crypto.randomBytes(24).toString('hex');
+    const expiracion = new Date(Date.now() + 15 * 60 * 1000); // 15 minutos
+
+    await pool.query(
+      `UPDATE "BDTMA_USUA" SET "TMA_RESETO" = $1, "TMA_RESETP" = $2 WHERE "TMA_CEDULA" = $3`,
+      [token, expiracion, cedula]
+    );
+
+    // Devolver token para que frontend habilite los inputs de nueva contraseña
+    return res.json({ ok: true, mensaje: "Identidad verificada", token, expires_at: expiracion });
+  } catch (error) {
+    console.error('verificarIdentidad error:', error);
+    return res.status(500).json({ mensaje: "Error verificando identidad", error: error.message });
+  }
+};
+
