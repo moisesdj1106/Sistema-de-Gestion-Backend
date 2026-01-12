@@ -1,5 +1,5 @@
 import { Router } from "express";
-import {  validarUsuario, getTipoDocumentos, getComunidades, crearNoticia, obtenerNoticias, getDesastres, createUser, getComunidad, getParroquias, crearComunidad, editarComunidad, eliminarComunidad, crearAfectacion, getComunidadesNombres, getDesastresNombres, getAfectaciones, crearDamnificado, crearVictima, listarDamnificados, editarDamnificado, eliminarDamnificado, listarVictimas, editarVictima, eliminarVictima, getZonasAfectadas, getTiposPerdida, crearPerdidas, getTiposDocument, listarPerdidas, editarPerdida, eliminarPerdida, getDashboardData, registrarDonante, getTiposDonante, registrarDonacion, listarDonantes, getTiposEstiloDonacion, listarDonaciones, editarDonacion, eliminarDonacion, editarDonante, eliminarDonante, listarDonantesFull, eliminarNoticia, solicitarRecuperacion, restablecerContrasena, listarPaises, listarEstadosPorPais, listarMunicipiosPorEstado, listarParroquiasPorMunicipio, listarComunidadesPorParroquia, listarAfectaciones, editarAfectacion, eliminarAfectacion, obtenerUltimaAfectacion, generarPdfAfectacion, listarAfectacionesResumenPorFecha, generarPdfResumenAfectacionesPorFecha, listarUsuarios, editarUsuario, eliminarUsuario, checkExistence, verificarIdentidad } from "../controllers/users.controllers.js";
+import {  validarUsuario, getTipoDocumentos, getComunidades, crearNoticia, obtenerNoticias, getDesastres, createUser, getComunidad, getParroquias, crearComunidad, editarComunidad, eliminarComunidad, crearAfectacion, getComunidadesNombres, getDesastresNombres, getAfectaciones, crearDamnificado, crearVictima, listarDamnificados, editarDamnificado, eliminarDamnificado, listarVictimas, editarVictima, eliminarVictima, getZonasAfectadas, getTiposPerdida, crearPerdidas, getTiposDocument, listarPerdidas, editarPerdida, eliminarPerdida, getDashboardData, registrarDonante, getTiposDonante, registrarDonacion, listarDonantes, getTiposEstiloDonacion, listarDonaciones, editarDonacion, eliminarDonacion, editarDonante, eliminarDonante, listarDonantesFull, eliminarNoticia, solicitarRecuperacion, restablecerContrasena, listarPaises, listarEstadosPorPais, listarMunicipiosPorEstado, listarParroquiasPorMunicipio, listarComunidadesPorParroquia, listarAfectaciones, editarAfectacion, eliminarAfectacion, obtenerUltimaAfectacion, generarPdfAfectacion, listarAfectacionesResumenPorFecha, generarPdfResumenAfectacionesPorFecha, listarUsuarios, editarUsuario, eliminarUsuario, checkExistence, verificarIdentidad, registerPersonaAfectada, listarAfectados, editarAfectado, eliminarAfectado } from "../controllers/users.controllers.js";
 
 const router = Router();
 
@@ -122,5 +122,12 @@ router.delete('/usuarios/:cedula', eliminarUsuario);
 
 
 router.post('/verificar-identidad', verificarIdentidad);
+
+// Personas afectadas
+router.post('/personas-afectadas', registerPersonaAfectada);
+
+router.get('/afectados', listarAfectados);
+router.put('/afectados/:id', editarAfectado);
+router.delete('/afectados/:id', eliminarAfectado);
 
 export default router;

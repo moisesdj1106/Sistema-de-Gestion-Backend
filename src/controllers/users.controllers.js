@@ -82,8 +82,6 @@ export const checkExistence = async (req, res) => {
 };
 // ...existing code...
 
-// ...existing code...
-
 // Crear usuario// ...existing code...
 export const createUser = async (req, res) => {
   try {
@@ -1158,7 +1156,6 @@ export const editarDonante = async (req, res) => {
         res.status(500).json({ mensaje: "Error al editar donante", error: error.message });
     }
 };
-// ...existing code...
 // Eliminar donante
 export const eliminarDonante = async (req, res) => {
     try {
@@ -1485,7 +1482,23 @@ export const generarPdfAfectacion = async (req, res) => {
       [id]
     );
 
-    // 5. Construir el documento PDF en horizontal y con fuente más pequeña para la descripción
+    // 5. Afectados de BDTTR_HERI
+    const afectadosResult = await pool.query(
+      `SELECT "TTR_NOMBRE", "TTR_APELLI", "TTR_CEDULA", "TTR_TELEFO"
+       FROM "BDTTR_HERI"
+       WHERE "TTR_COAFEC" = $1`,
+      [id]
+    );
+
+    // Agregar afectados al PDF
+    const afectados = afectadosResult.rows.map(afectado => ({
+      nombre: afectado.TTR_NOMBRE,
+      apellido: afectado.TTR_APELLI,
+      cedula: afectado.TTR_CEDULA,
+      telefono: afectado.TTR_TELEFO
+    }));
+
+    // 6. Construir el documento PDF en horizontal y con fuente más pequeña para la descripción
     const docDefinition = {
       pageOrientation: 'landscape',
       pageMargins: [20, 20, 20, 20],
@@ -1510,7 +1523,7 @@ export const generarPdfAfectacion = async (req, res) => {
             {
               image: 'src/assets/gobierno.png',
               width: 71,
-              height: 70,
+              height:     70,
               alignment: 'right'
             }
           ],
@@ -1665,6 +1678,41 @@ export const generarPdfAfectacion = async (req, res) => {
                 paddingTop: () => 4,
                 paddingBottom: () => 4
               }
+            },
+
+        // Afectados de BDTTR_HERI
+        { text: 'Afectados', style: 'subheader', margin: [0, 6, 0, 6] },
+        afectadosResult.rows.length === 0
+          ? { text: 'No hay afectados registrados en BDTTR_HERI.', italics: true }
+          : {
+              table: {
+                headerRows: 1,
+                widths: ['*', '*', '*', '*'],
+                body: [
+                  [
+                    { text: 'Nombre', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
+                    { text: 'Apellido', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
+                    { text: 'Cédula', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
+                    { text: 'Teléfono', bold: true, fillColor: '#e3e3e3', alignment: 'center' }
+                  ],
+                  ...afectadosResult.rows.map(a => [
+                    { text: a.TTR_NOMBRE, alignment: 'center' },
+                    { text: a.TTR_APELLI, alignment: 'center' },
+                    { text: a.TTR_CEDULA, alignment: 'center' },
+                    { text: a.TTR_TELEFO, alignment: 'center' }
+                  ])
+                ]
+              },
+              layout: {
+                hLineWidth: () => 1,
+                vLineWidth: () => 1,
+                hLineColor: () => '#bbb',
+                vLineColor: () => '#bbb',
+                paddingLeft: () => 6,
+                paddingRight: () => 6,
+                paddingTop: () => 4,
+                paddingBottom: () => 4
+              }
             }
       ],
       styles: {
@@ -1705,9 +1753,9 @@ export const generarPdfAfectacion = async (req, res) => {
     res.status(500).json({ mensaje: 'Error al generar PDF', error: error.message });
   }
 };
-// ...existing code...
 
 
+// Listar afectaciones resumen por fecha
 export const listarAfectacionesResumenPorFecha = async (req, res) => {
   const { desde, hasta } = req.query;
   try {
@@ -1728,7 +1776,11 @@ export const listarAfectacionesResumenPorFecha = async (req, res) => {
         -- ¿Tiene pérdidas?
         EXISTS (
           SELECT 1 FROM "BDTTR_PERD" per WHERE per."TTR_COAFEC" = a."TTR_COAFEC"
-        ) AS tiene_perdidas
+        ) AS tiene_perdidas,
+        -- ¿Tiene afectados?
+        EXISTS (
+          SELECT 1 FROM "BDTTR_HERI" her WHERE her."TTR_COAFEC" = a."TTR_COAFEC"
+        ) AS tiene_afectados
       FROM "BDTTR_AFEC" a
       JOIN "BDTMA_COMU" c ON a."TTR_CODCOM" = c."TMA_CODCOM"
       JOIN "BDTMA_DESA" d ON a."TTR_CODESA" = d."TMA_CODESA"
@@ -1755,7 +1807,7 @@ export const generarPdfResumenAfectacionesPorFecha = async (req, res) => {
       logoBase64 = '';
     }
 
-    // Consulta con conteos y suma de pérdidas
+    // Consulta con conteos y suma de pérdidas, incluyendo afectados de BDTTR_HERI
     const result = await pool.query(`
       SELECT 
         a."TTR_COAFEC",
@@ -1765,7 +1817,8 @@ export const generarPdfResumenAfectacionesPorFecha = async (req, res) => {
         (SELECT COUNT(*) FROM "BDTTR_DAMN" dam WHERE dam."TTR_COAFEC" = a."TTR_COAFEC") AS cantidad_damnificados,
         (SELECT COUNT(*) FROM "BDTTR_VICT" vic WHERE vic."TTR_COAFEC" = a."TTR_COAFEC") AS cantidad_victimas,
         (SELECT COUNT(*) FROM "BDTTR_PERD" per WHERE per."TTR_COAFEC" = a."TTR_COAFEC") AS cantidad_perdidas,
-        COALESCE((SELECT SUM("TTR_VAESTI") FROM "BDTTR_PERD" per WHERE per."TTR_COAFEC" = a."TTR_COAFEC"), 0) AS suma_perdidas
+        COALESCE((SELECT SUM("TTR_VAESTI") FROM "BDTTR_PERD" per WHERE per."TTR_COAFEC" = a."TTR_COAFEC"), 0) AS suma_perdidas,
+        (SELECT COUNT(*) FROM "BDTTR_HERI" her WHERE her."TTR_COAFEC" = a."TTR_COAFEC") AS cantidad_afectados
       FROM "BDTTR_AFEC" a
       JOIN "BDTMA_COMU" c ON a."TTR_CODCOM" = c."TMA_CODCOM"
       JOIN "BDTMA_DESA" d ON a."TTR_CODESA" = d."TMA_CODESA"
@@ -1779,9 +1832,10 @@ export const generarPdfResumenAfectacionesPorFecha = async (req, res) => {
     const totalVictimas = result.rows.reduce((sum, r) => sum + Number(r.cantidad_victimas || 0), 0);
     const totalPerdidas = result.rows.reduce((sum, r) => sum + Number(r.cantidad_perdidas || 0), 0);
     const totalMontoPerdidas = result.rows.reduce((sum, r) => sum + Number(r.suma_perdidas || 0), 0);
+    const totalAfectados = result.rows.reduce((sum, r) => sum + Number(r.cantidad_afectados || 0), 0);
 
     const docDefinition = {
-      pageSize: { width: 1008, height: 612 },
+      pageSize: { width: 1150, height: 612 }, // Ajustar el ancho de la hoja
       pageOrientation: 'landscape',
       content: [
         {
@@ -1825,7 +1879,8 @@ export const generarPdfResumenAfectacionesPorFecha = async (req, res) => {
               80, 55,            // ¿Damnificados? | Cantidad
               65, 55,            // ¿Víctimas?     | Cantidad
               65, 55,            // ¿Pérdidas?     | Cantidad
-              100                // Total Pérdidas
+              100,               // Total Pérdidas
+              55, 55             // ¿Afectados?    | Cantidad
             ],
             body: [
               [
@@ -1837,9 +1892,12 @@ export const generarPdfResumenAfectacionesPorFecha = async (req, res) => {
                 { text: 'Cantidad', bold: true, fillColor: '#eeeeee', alignment: 'center' },
                 { text: 'Víctimas', bold: true, fillColor: '#eeeeee', alignment: 'center' },
                 { text: 'Cantidad', bold: true, fillColor: '#eeeeee', alignment: 'center' },
+                 { text: 'Afectados', bold: true, fillColor: '#eeeeee', alignment: 'center' },
+                { text: 'Cantidad', bold: true, fillColor: '#eeeeee', alignment: 'center' },
                 { text: 'Pérdidas', bold: true, fillColor: '#eeeeee', alignment: 'center' },
                 { text: 'Cantidad', bold: true, fillColor: '#eeeeee', alignment: 'center' },
                 { text: 'Pérdidas Bs', bold: true, fillColor: '#eeeeee', alignment: 'center' }
+               
               ],
               ...result.rows.map((a, idx) => [
                 { text: idx + 1, alignment: 'center' },
@@ -1850,9 +1908,12 @@ export const generarPdfResumenAfectacionesPorFecha = async (req, res) => {
                 { text: a.cantidad_damnificados || 0, alignment: 'center' },
                 { text: a.cantidad_victimas > 0 ? 'Sí' : 'No', alignment: 'center' },
                 { text: a.cantidad_victimas || 0, alignment: 'center' },
+                   { text: a.cantidad_afectados > 0 ? 'Sí' : 'No', alignment: 'center' },
+                { text: a.cantidad_afectados || 0, alignment: 'center' },
                 { text: a.cantidad_perdidas > 0 ? 'Sí' : 'No', alignment: 'center' },
                 { text: a.cantidad_perdidas || 0, alignment: 'center' },
                 { text: Number(a.suma_perdidas).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }), alignment: 'center' }
+             
               ])
             ]
           },
@@ -1872,21 +1933,25 @@ export const generarPdfResumenAfectacionesPorFecha = async (req, res) => {
           alignment: 'center',
           margin: [125, 20, 0, 0],
           table: {
-            widths: [120, 120, 120, 120, 120],
+            widths: [120, 120, 120, 120, 120, 120],
             body: [
               [
                 { text: 'Total Afectaciones', bold: true, fillColor: '#eeeeee', alignment: 'center' },
                 { text: 'Total Damnificados', bold: true, fillColor: '#eeeeee', alignment: 'center' },
                 { text: 'Total Víctimas', bold: true, fillColor: '#eeeeee', alignment: 'center' },
+                { text: 'Total Afectados', bold: true, fillColor: '#eeeeee', alignment: 'center' },
                 { text: 'Total Pérdidas', bold: true, fillColor: '#eeeeee', alignment: 'center' },
                 { text: 'Monto Total Pérdidas', bold: true, fillColor: '#eeeeee', alignment: 'center' }
+                
               ],
               [
                 { text: totalAfectaciones, alignment: 'center' },
                 { text: totalDamnificados, alignment: 'center' },
                 { text: totalVictimas, alignment: 'center' },
+                { text: totalAfectados, alignment: 'center' },
                 { text: totalPerdidas, alignment: 'center' },
                 { text: Number(totalMontoPerdidas).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }), alignment: 'center' }
+                
               ]
             ]
           },
@@ -1937,7 +2002,6 @@ export const generarPdfResumenAfectacionesPorFecha = async (req, res) => {
     res.status(500).json({ mensaje: 'Error al generar PDF', error: error.message });
   }
 };
-
 
 // Listar todos los usuarios con campos relevantes
 export const listarUsuarios = async (req, res) => {
@@ -2013,10 +2077,8 @@ export const eliminarUsuario = async (req, res) => {
 
 
 
-
 //////////// 
 
-// ...existing code...
 
 // Verificar identidad (cedula + fecha de nacimiento) y generar token temporal
 export const verificarIdentidad = async (req, res) => {
@@ -2026,7 +2088,7 @@ export const verificarIdentidad = async (req, res) => {
       return res.status(400).json({ mensaje: "Faltan datos: cedula y fecha_nac son obligatorios" });
     }
 
-    // Busca usuario por cédula y fecha de nacimiento (comparación por DATE)
+    // Busca usuario por cédula y fecha de nacimiento 
     const q = `SELECT "TMA_CEDULA", "TMA_USUARI" FROM "BDTMA_USUA"
                WHERE "TMA_CEDULA" = $1 AND DATE("TMA_FENACI") = $2::date LIMIT 1`;
     const result = await pool.query(q, [String(cedula).trim(), fecha_nac]);
@@ -2049,5 +2111,93 @@ export const verificarIdentidad = async (req, res) => {
     console.error('verificarIdentidad error:', error);
     return res.status(500).json({ mensaje: "Error verificando identidad", error: error.message });
   }
+};
+
+// Registrar personas afectadas
+export const registerPersonaAfectada = async (req, res) => {
+    const { TTR_TIPODO, TTR_CEDULA, TTR_NOMBRE, TTR_APELLI, TTR_TELEFO, TTR_COAFEC } = req.body;
+
+    // Validar que todos los campos requeridos estén presentes
+    if (!TTR_TIPODO || !TTR_CEDULA || !TTR_NOMBRE || !TTR_APELLI || !TTR_TELEFO || !TTR_COAFEC) {
+        return res.status(400).json({
+            message: "Todos los campos son obligatorios: TTR_TIPODO, TTR_CEDULA, TTR_NOMBRE, TTR_APELLI, TTR_TELEFO, TTR_COAFEC."
+        });
+    }
+
+    try {
+        const query = `INSERT INTO "BDTTR_HERI" ("TTR_TIPODO", "TTR_CEDULA", "TTR_NOMBRE", "TTR_APELLI", "TTR_TELEFO", "TTR_COAFEC")
+                       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`;
+        const values = [TTR_TIPODO, TTR_CEDULA, TTR_NOMBRE, TTR_APELLI, TTR_TELEFO, TTR_COAFEC];
+
+        const result = await pool.query(query, values);
+        return res.status(201).json({ message: "Persona afectada registrada exitosamente", data: result.rows[0] });
+    } catch (error) {
+        console.error(error);
+        return res.status(500).json({ message: "Error al registrar la persona afectada" });
+    }
+};
+
+// Listar personas afectadas
+export const listarAfectados = async (req, res) => {
+    try {
+        const query = `
+            SELECT h.*, 
+                   t."TMA_NOMBRE" AS "tipo_documento",
+                   COALESCE(c."TMA_NOMBRE") AS "comunidad"
+            FROM "BDTTR_HERI" h
+            LEFT JOIN "BDTMA_TIDO" t ON h."TTR_TIPODO" = t."TMA_CODDOC"
+            LEFT JOIN "BDTTR_AFEC" a ON h."TTR_COAFEC" = a."TTR_COAFEC"
+            LEFT JOIN "BDTMA_COMU" c ON a."TTR_CODCOM" = c."TMA_CODCOM"
+            ORDER BY h."TTR_NOMBRE" ASC
+        `;
+        const result = await pool.query(query);
+        return res.json(result.rows);
+    } catch (error) {
+        console.error(error);
+        return res.status(500).json({ message: "Error al listar los afectados" });
+    }
+};
+
+// Editar persona afectada
+export const editarAfectado = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { TTR_TIPODO, TTR_CEDULA, TTR_NOMBRE, TTR_APELLI, TTR_TELEFO, TTR_COAFEC } = req.body;
+
+        const query = `
+            UPDATE "BDTTR_HERI"
+            SET "TTR_TIPODO" = $1, "TTR_CEDULA" = $2, "TTR_NOMBRE" = $3, "TTR_APELLI" = $4, "TTR_TELEFO" = $5, "TTR_COAFEC" = $6
+            WHERE "TTR_COHERI" = $7 RETURNING *
+        `;
+        const values = [TTR_TIPODO, TTR_CEDULA, TTR_NOMBRE, TTR_APELLI, TTR_TELEFO, TTR_COAFEC, id];
+
+        const result = await pool.query(query, values);
+        if (result.rowCount === 0) return res.status(404).json({ message: "Afectado no encontrado" });
+
+        return res.json({ message: "Afectado actualizado exitosamente", data: result.rows[0] });
+    } catch (error) {
+        console.error(error);
+        return res.status(500).json({ message: "Error al editar el afectado" });
+    }
+};
+
+// Eliminar persona afectada
+export const eliminarAfectado = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const query = `
+            DELETE FROM "BDTTR_HERI"
+            WHERE "TTR_COHERI" = $1`;
+        const values = [id];
+
+        const result = await pool.query(query, values);
+        if (result.rowCount === 0) return res.status(404).json({ message: "Afectado no encontrado" });
+
+        return res.json({ message: "Afectado eliminado exitosamente" });
+    } catch (error) {
+        console.error(error);
+        return res.status(500).json({ message: "Error al eliminar el afectado" });
+    }
 };
 

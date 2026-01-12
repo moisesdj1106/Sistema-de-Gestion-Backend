@@ -11,5 +11,12 @@ export const pool = new pg.Pool({
     ssl: {
         rejectUnauthorized: false, // Asegúrate de que esto sea seguro para tu entorno
     },
+/*
+    user: 'postgres',
+    host: 'localhost',
+    password: 'moises',
+    database: 'SISGESDESN',
+    port: 5432,*/
+
 });
 
