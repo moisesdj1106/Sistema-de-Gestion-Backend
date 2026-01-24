@@ -512,7 +512,7 @@ export const crearDamnificado = async (req, res) => {
 // ...existing code...
 export const crearVictima = async (req, res) => {
     try {
-        const { cedula, tipodo, nombre, apelli, coafec, certif } = req.body;
+        const { cedula, tipodo, nombre, apelli, coafec } = req.body; // Removed 'certif' from destructuring
         if (!cedula || tipodo === undefined || tipodo === null || !nombre || !apelli || !coafec) {
             return res.status(400).json({ mensaje: "Faltan campos obligatorios" });
         }
@@ -534,9 +534,9 @@ export const crearVictima = async (req, res) => {
 
         const result = await pool.query(
             `INSERT INTO "BDTTR_VICT" (
-                "TTR_CEDULA", "TTR_TIPODO", "TTR_NOMBRE", "TTR_APELLI", "TTR_COAFEC", "TTR_CERTIF"
-            ) VALUES ($1, $2, INITCAP($3), INITCAP($4), $5, $6) RETURNING *`,
-            [cedula, tipodoInt, nombre, apelli, coafec, certif]
+                "TTR_CEDULA", "TTR_TIPODO", "TTR_NOMBRE", "TTR_APELLI", "TTR_COAFEC"
+            ) VALUES ($1, $2, INITCAP($3), INITCAP($4), $5) RETURNING *`, // Removed 'TTR_CERTIF' from query
+            [cedula, tipodoInt, nombre, apelli, coafec] // Removed 'certif' from values
         );
         res.status(201).json({ mensaje: "Víctima registrada", victima: result.rows[0] });
     } catch (error) {
@@ -643,12 +643,12 @@ export const listarVictimas = async (req, res) => {
 export const editarVictima = async (req, res) => {
     try {
         const { id } = req.params;
-        const { cedula, tipodo, nombre, apelli, coafec, certif } = req.body;
+        const { cedula, tipodo, nombre, apelli, coafec } = req.body;
         const result = await pool.query(
             `UPDATE "BDTTR_VICT"
-             SET "TTR_CEDULA"=$1, "TTR_TIPODO"=$2, "TTR_NOMBRE"=INITCAP($3), "TTR_APELLI"=INITCAP($4), "TTR_COAFEC"=$5, "TTR_CERTIF"=$6
-             WHERE "TTR_COVICT"=$7 RETURNING *`,
-            [cedula, tipodo, nombre, apelli, coafec, certif, id]
+             SET "TTR_CEDULA"=$1, "TTR_TIPODO"=$2, "TTR_NOMBRE"=INITCAP($3), "TTR_APELLI"=INITCAP($4), "TTR_COAFEC"=$5
+             WHERE "TTR_COVICT"=$6 RETURNING *`,
+            [cedula, tipodo, nombre, apelli, coafec, id]
         );
         if (result.rowCount === 0) return res.status(404).json({ message: "No encontrado" });
         res.json({ mensaje: "Víctima actualizada", victima: result.rows[0] });
@@ -1523,7 +1523,7 @@ export const generarPdfAfectacion = async (req, res) => {
             {
               image: 'src/assets/gobierno.png',
               width: 71,
-              height:     70,
+              height:          70,
               alignment: 'right'
             }
           ],
