@@ -734,7 +734,7 @@ export const crearPerdidas = async (req, res) => {
                 `INSERT INTO "BDTTR_PERD" (
                     "TTR_COAFEC", "TTR_COTIPO", "TTR_VAESTI", "TTR_CODDOC",
                     "TTR_CEDULA", "TTR_NOMBRE", "TTR_APELLI", "TTR_DESCRI"
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+                ) VALUES ($1, $2, $3, $4, $5, INITCAP($6), INITCAP($7), $8) RETURNING *`,
                 [coafec, p.cotipo, p.vaesti, coddoc, cedula, nombre, apelli, descri]
             );
             results.push(result.rows[0]);
@@ -807,7 +807,7 @@ export const editarPerdida = async (req, res) => {
         const { coafec, cotipo, vaesti, coddoc, cedula, nombre, apelli } = req.body;
         const result = await pool.query(
             `UPDATE "BDTTR_PERD"
-             SET "TTR_COAFEC"=$1, "TTR_COTIPO"=$2, "TTR_VAESTI"=$3, "TTR_CODDOC"=$4, "TTR_CEDULA"=$5, "TTR_NOMBRE"=$6, "TTR_APELLI"=$7
+             SET "TTR_COAFEC"=$1, "TTR_COTIPO"=$2, "TTR_VAESTI"=$3, "TTR_CODDOC"=$4, "TTR_CEDULA"=$5, "TTR_NOMBRE"=INITCAP($6), "TTR_APELLI"=INITCAP($7)
              WHERE "TTR_COPERD"=$8 RETURNING *`,
             [coafec, cotipo, vaesti, coddoc, cedula, nombre, apelli, id]
         );
