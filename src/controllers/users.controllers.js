@@ -1687,7 +1687,7 @@ export const generarPdfAfectacion = async (req, res) => {
                 body: [
                   [
                     { text: 'N°Doc', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
-                    { text: 'Nombre', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
+                    { text: 'Nombre ', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
                     { text: 'Apellido', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
                     { text: 'Teléfono', bold: true, fillColor: '#e3e3e3', alignment: 'center' }
                   ],
