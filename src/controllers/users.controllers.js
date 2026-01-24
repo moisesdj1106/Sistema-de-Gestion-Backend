@@ -1679,7 +1679,7 @@ export const generarPdfAfectacion = async (req, res) => {
         // Afectados de BDTTR_HERI
         { text: 'Afectados', style: 'subheader', margin: [0, 6, 0, 6] },
         afectadosResult.rows.length === 0
-          ? { text: 'No hay afectados registrados en BDTTR_HERI.', italics: true }
+          ? { text: 'No hay afectados registrados', italics: true }
           : {
               table: {
                 headerRows: 1,
