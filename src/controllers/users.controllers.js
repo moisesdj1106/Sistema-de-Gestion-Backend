@@ -498,7 +498,7 @@ export const crearDamnificado = async (req, res) => {
         const result = await pool.query(
             `INSERT INTO "BDTTR_DAMN" (
                 "TTR_NOMBRE", "TTR_APELLI", "TTR_FENACI", "TTR_CONTAC", "TTR_COAFEC", "TTR_ESALUD", "TTR_CEDULA", "TTR_TIPODO"
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+            ) VALUES (INITCAP($1), INITCAP($2), $3, $4, $5, INITCAP($6), $7, $8) RETURNING *`,
             [nombre, apelli, fenaci, contac, coafec, esalud, cedula, tipodo]
         );
         res.status(201).json({ mensaje: "Damnificado registrado", damnificado: result.rows[0] });
@@ -512,7 +512,7 @@ export const crearDamnificado = async (req, res) => {
 // ...existing code...
 export const crearVictima = async (req, res) => {
     try {
-        const { cedula, tipodo, nombre, apelli, coafec } = req.body; // Removed 'certif' from destructuring
+        const { cedula, tipodo, nombre, apelli, coafec, certif } = req.body;
         if (!cedula || tipodo === undefined || tipodo === null || !nombre || !apelli || !coafec) {
             return res.status(400).json({ mensaje: "Faltan campos obligatorios" });
         }
@@ -534,9 +534,9 @@ export const crearVictima = async (req, res) => {
 
         const result = await pool.query(
             `INSERT INTO "BDTTR_VICT" (
-                "TTR_CEDULA", "TTR_TIPODO", "TTR_NOMBRE", "TTR_APELLI", "TTR_COAFEC"
-            ) VALUES ($1, $2, INITCAP($3), INITCAP($4), $5) RETURNING *`, // Removed 'TTR_CERTIF' from query
-            [cedula, tipodoInt, nombre, apelli, coafec] // Removed 'certif' from values
+                "TTR_CEDULA", "TTR_TIPODO", "TTR_NOMBRE", "TTR_APELLI", "TTR_COAFEC", "TTR_CERTIF"
+            ) VALUES ($1, $2, INITCAP($3), INITCAP($4), $5, $6) RETURNING *`,
+            [cedula, tipodoInt, nombre, apelli, coafec, certif]
         );
         res.status(201).json({ mensaje: "Víctima registrada", victima: result.rows[0] });
     } catch (error) {
@@ -643,12 +643,12 @@ export const listarVictimas = async (req, res) => {
 export const editarVictima = async (req, res) => {
     try {
         const { id } = req.params;
-        const { cedula, tipodo, nombre, apelli, coafec } = req.body;
+        const { cedula, tipodo, nombre, apelli, coafec, certif } = req.body;
         const result = await pool.query(
             `UPDATE "BDTTR_VICT"
-             SET "TTR_CEDULA"=$1, "TTR_TIPODO"=$2, "TTR_NOMBRE"=INITCAP($3), "TTR_APELLI"=INITCAP($4), "TTR_COAFEC"=$5
-             WHERE "TTR_COVICT"=$6 RETURNING *`,
-            [cedula, tipodo, nombre, apelli, coafec, id]
+             SET "TTR_CEDULA"=$1, "TTR_TIPODO"=$2, "TTR_NOMBRE"=INITCAP($3), "TTR_APELLI"=INITCAP($4), "TTR_COAFEC"=$5, "TTR_CERTIF"=$6
+             WHERE "TTR_COVICT"=$7 RETURNING *`,
+            [cedula, tipodo, nombre, apelli, coafec, certif, id]
         );
         if (result.rowCount === 0) return res.status(404).json({ message: "No encontrado" });
         res.json({ mensaje: "Víctima actualizada", victima: result.rows[0] });
@@ -835,13 +835,12 @@ export const eliminarPerdida = async (req, res) => {
     }
 };
 
-
 export const getDashboardData = async (req, res) => {
     try {
         // Total víctimas (con cédula válida)
         const victimas = await pool.query(`
             SELECT 
-                COUNT(*) FILTER (WHERE "TTR_CEDULA" IS NOT NULL AND "TTR_CEDULA" != '') AS totalVictimas
+                COUNT(*) FILTER (WHERE "TTR_CEDULA" IS NOT NULL AND "TTR_CEDULA" != '') AS fallecidos
             FROM "BDTTR_VICT"
         `);
 
@@ -855,13 +854,15 @@ export const getDashboardData = async (req, res) => {
             LIMIT 1
         `);
 
-        // Desastres por tipo (cantidad)
+        // Desastres por tipo (cantidad, fallecidos)
         const desastresPorTipo = await pool.query(`
             SELECT 
                 d."TMA_NOMBRE" as tipo,
-                COUNT(a."TTR_COAFEC") as cantidad
+                COUNT(a."TTR_COAFEC") as cantidad,
+                COUNT(v."TTR_COVICT") FILTER (WHERE v."TTR_CEDULA" IS NOT NULL AND v."TTR_CEDULA" != '') as fallecidos
             FROM "BDTTR_AFEC" a
             JOIN "BDTMA_DESA" d ON a."TTR_CODESA" = d."TMA_CODESA"
+            LEFT JOIN "BDTTR_VICT" v ON v."TTR_COAFEC" = a."TTR_COAFEC"
             GROUP BY d."TMA_NOMBRE"
             ORDER BY cantidad DESC
         `);
@@ -874,17 +875,44 @@ export const getDashboardData = async (req, res) => {
             ORDER BY cantidad DESC
         `);
 
+        // Víctimas fatales (como estado adicional)
+        const victimasFatales = await pool.query(`
+            SELECT COUNT(*) as cantidad
+            FROM "BDTTR_VICT"
+            WHERE "TTR_CEDULA" IS NOT NULL AND "TTR_CEDULA" != ''
+        `);
+
+        // Pérdidas por tipo
+        const perdidasPorTipo = await pool.query(`
+            SELECT t."TTR_NOMBRE" as tipo, COUNT(p."TTR_COPERD") as cantidad
+            FROM "BDTTR_PERD" p
+            JOIN "BDTTR_TIPE" t ON p."TTR_COTIPO" = t."TTR_COTIPO"
+            GROUP BY t."TTR_NOMBRE"
+            ORDER BY cantidad DESC
+        `);
+
+        // Unimos damnificados y víctimas fatales para la gráfica
+        const estadosSaludGrafica = [
+            ...estadosSalud.rows.map(r => ({
+                estado: r.estado,
+                cantidad: Number(r.cantidad)
+            })),
+            { estado: 'Fallecidos', cantidad: Number(victimasFatales.rows[0].cantidad) }
+        ];
+
         res.json({
             resumen: {
-                totalVictimas: Number(victimas.rows[0].totalVictimas),
+                fallecidos: Number(victimas.rows[0].fallecidos),
                 desastreMasFrecuente: desastreFrecuente.rows[0]?.TMA_NOMBRE || 'N/A'
             },
             desastresPorTipo: desastresPorTipo.rows.map(r => ({
                 tipo: r.tipo,
-                cantidad: Number(r.cantidad)
+                cantidad: Number(r.cantidad),
+                fallecidos: Number(r.fallecidos)
             })),
-            estadosSalud: estadosSalud.rows.map(r => ({
-                estado: r.estado,
+            estadosSalud: estadosSaludGrafica,
+            perdidasPorTipo: perdidasPorTipo.rows.map(r => ({
+                tipo: r.tipo,
                 cantidad: Number(r.cantidad)
             }))
         });
@@ -893,7 +921,6 @@ export const getDashboardData = async (req, res) => {
         res.status(500).json({ mensaje: "Error al obtener datos del dashboard", error: error.message });
     }
 };
-
 // Registrar donante
 export const registrarDonante = async (req, res) => {
   try {
@@ -1494,7 +1521,7 @@ export const generarPdfAfectacion = async (req, res) => {
             {
               image: 'src/assets/gobierno.png',
               width: 71,
-              height:          70,
+              height:     70,
               alignment: 'right'
             }
           ],
@@ -2097,7 +2124,7 @@ export const registerPersonaAfectada = async (req, res) => {
 
     try {
         const query = `INSERT INTO "BDTTR_HERI" ("TTR_TIPODO", "TTR_CEDULA", "TTR_NOMBRE", "TTR_APELLI", "TTR_TELEFO", "TTR_COAFEC")
-                       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`;
+                       VALUES ($1, $2, INITCAP($3), INITCAP($4), $5, $6) RETURNING *`;
         const values = [TTR_TIPODO, TTR_CEDULA, TTR_NOMBRE, TTR_APELLI, TTR_TELEFO, TTR_COAFEC];
 
         const result = await pool.query(query, values);
