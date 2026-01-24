@@ -1462,7 +1462,7 @@ export const generarPdfAfectacion = async (req, res) => {
 
     // 3. Víctimas
     const victimasResult = await pool.query(
-      `SELECT "TTR_NOMBRE", "TTR_APELLI", "TTR_CEDULA", "TTR_CERTIF"
+      `SELECT "TTR_NOMBRE", "TTR_APELLI", "TTR_CEDULA"
        FROM "BDTTR_VICT"
        WHERE "TTR_COAFEC" = $1`,
       [id]
@@ -1614,13 +1614,13 @@ export const generarPdfAfectacion = async (req, res) => {
                     { text: 'N°Doc', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
                     { text: 'Nombre', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
                     { text: 'Apellido', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
-                    { text: 'N° Certificado', bold: true, fillColor: '#e3e3e3', alignment: 'center' }
+                    
                   ],
                   ...victimasResult.rows.map(v => [
                     { text: v.TTR_CEDULA, alignment: 'center' },
                     { text: v.TTR_NOMBRE, alignment: 'center' },
                     { text: v.TTR_APELLI, alignment: 'center' },
-                    { text: v.TTR_CERTIF, alignment: 'center' }
+                    
                   ])
                 ]
               },
