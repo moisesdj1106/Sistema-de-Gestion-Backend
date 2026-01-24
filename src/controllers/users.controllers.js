@@ -880,7 +880,7 @@ export const getDashboardData = async (req, res) => {
         const victimasFatales = await pool.query(`
             SELECT COUNT(*) as cantidad
             FROM "BDTTR_VICT"
-            WHERE "TTR_CERTIF" IS NOT NULL AND "TTR_CERTIF" != ''
+            WHERE "TTR_CEDULA" IS NOT NULL AND "TTR_CEDULA" != ''
         `);
 
         // Pérdidas por tipo
