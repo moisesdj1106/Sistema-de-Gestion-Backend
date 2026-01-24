@@ -841,7 +841,7 @@ export const getDashboardData = async (req, res) => {
         // Total fallecidos (víctimas con certificado)
         const victimas = await pool.query(`
             SELECT 
-                COUNT(*) FILTER (WHERE "TTR_CERTIF" IS NOT NULL AND "TTR_CERTIF" != '') AS fallecidos
+                COUNT(*) FILTER (WHERE "TTR_CEDULA" IS NOT NULL AND "TTR_CEDULA" != '') AS fallecidos
             FROM "BDTTR_VICT"
         `);
 
