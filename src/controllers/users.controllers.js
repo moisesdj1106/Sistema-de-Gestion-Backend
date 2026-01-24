@@ -512,7 +512,7 @@ export const crearDamnificado = async (req, res) => {
 // ...existing code...
 export const crearVictima = async (req, res) => {
     try {
-        const { cedula, tipodo, nombre, apelli, coafec, certif } = req.body;
+        const { cedula, tipodo, nombre, apelli, coafec } = req.body;
         if (!cedula || tipodo === undefined || tipodo === null || !nombre || !apelli || !coafec) {
             return res.status(400).json({ mensaje: "Faltan campos obligatorios" });
         }
@@ -534,9 +534,9 @@ export const crearVictima = async (req, res) => {
 
         const result = await pool.query(
             `INSERT INTO "BDTTR_VICT" (
-                "TTR_CEDULA", "TTR_TIPODO", "TTR_NOMBRE", "TTR_APELLI", "TTR_COAFEC", "TTR_CERTIF"
-            ) VALUES ($1, $2, INITCAP($3), INITCAP($4), $5, $6) RETURNING *`,
-            [cedula, tipodoInt, nombre, apelli, coafec, certif]
+                "TTR_CEDULA", "TTR_TIPODO", "TTR_NOMBRE", "TTR_APELLI", "TTR_COAFEC"
+            ) VALUES ($1, $2, INITCAP($3), INITCAP($4), $5) RETURNING *`,
+            [cedula, tipodoInt, nombre, apelli, coafec]
         );
         res.status(201).json({ mensaje: "Víctima registrada", victima: result.rows[0] });
     } catch (error) {
@@ -643,12 +643,12 @@ export const listarVictimas = async (req, res) => {
 export const editarVictima = async (req, res) => {
     try {
         const { id } = req.params;
-        const { cedula, tipodo, nombre, apelli, coafec, certif } = req.body;
+        const { cedula, tipodo, nombre, apelli, coafec } = req.body;
         const result = await pool.query(
             `UPDATE "BDTTR_VICT"
-             SET "TTR_CEDULA"=$1, "TTR_TIPODO"=$2, "TTR_NOMBRE"=INITCAP($3), "TTR_APELLI"=INITCAP($4), "TTR_COAFEC"=$5, "TTR_CERTIF"=$6
-             WHERE "TTR_COVICT"=$7 RETURNING *`,
-            [cedula, tipodo, nombre, apelli, coafec, certif, id]
+             SET "TTR_CEDULA"=$1, "TTR_TIPODO"=$2, "TTR_NOMBRE"=INITCAP($3), "TTR_APELLI"=INITCAP($4), "TTR_COAFEC"=$5
+             WHERE "TTR_COVICT"=$6 RETURNING *`,
+            [cedula, tipodo, nombre, apelli, coafec, id]
         );
         if (result.rowCount === 0) return res.status(404).json({ message: "No encontrado" });
         res.json({ mensaje: "Víctima actualizada", victima: result.rows[0] });
@@ -1521,7 +1521,7 @@ export const generarPdfAfectacion = async (req, res) => {
             {
               image: 'src/assets/gobierno.png',
               width: 71,
-              height:     70,
+              height: 70,
               alignment: 'right'
             }
           ],
@@ -1571,7 +1571,7 @@ export const generarPdfAfectacion = async (req, res) => {
                 widths: ['auto', 150, 150, 90, 110, 90],
                 body: [
                   [
-                    { text: 'Cédula', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
+                    { text: 'N°Doc', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
                     { text: 'Nombre', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
                     { text: 'Apellido', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
                     { text: 'Nacimiento', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
@@ -1608,19 +1608,17 @@ export const generarPdfAfectacion = async (req, res) => {
           : {
               table: {
                 headerRows: 1,
-                widths: ['auto', 170, 170, '*'],
+                widths: ['auto', 170, 170],
                 body: [
                   [
                     { text: 'N°Doc', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
                     { text: 'Nombre', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
-                    { text: 'Apellido', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
-                    
+                    { text: 'Apellido', bold: true, fillColor: '#e3e3e3', alignment: 'center' }
                   ],
                   ...victimasResult.rows.map(v => [
                     { text: v.TTR_CEDULA, alignment: 'center' },
                     { text: v.TTR_NOMBRE, alignment: 'center' },
-                    { text: v.TTR_APELLI, alignment: 'center' },
-                    
+                    { text: v.TTR_APELLI, alignment: 'center' }
                   ])
                 ]
               },
@@ -1648,7 +1646,7 @@ export const generarPdfAfectacion = async (req, res) => {
                 widths: ['auto', 140, 140, 140, '*', 90],
                 body: [
                   [
-                    { text: 'Cédula', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
+                    { text: 'N°Doc', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
                     { text: 'Nombre', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
                     { text: 'Apellido', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
                     { text: 'Tipo', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
@@ -1688,15 +1686,15 @@ export const generarPdfAfectacion = async (req, res) => {
                 widths: ['*', '*', '*', '*'],
                 body: [
                   [
+                    { text: 'N°Doc', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
                     { text: 'Nombre', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
                     { text: 'Apellido', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
-                    { text: 'Cédula', bold: true, fillColor: '#e3e3e3', alignment: 'center' },
                     { text: 'Teléfono', bold: true, fillColor: '#e3e3e3', alignment: 'center' }
                   ],
                   ...afectadosResult.rows.map(a => [
+                    { text: a.TTR_CEDULA, alignment: 'center' },
                     { text: a.TTR_NOMBRE, alignment: 'center' },
                     { text: a.TTR_APELLI, alignment: 'center' },
-                    { text: a.TTR_CEDULA, alignment: 'center' },
                     { text: a.TTR_TELEFO, alignment: 'center' }
                   ])
                 ]
