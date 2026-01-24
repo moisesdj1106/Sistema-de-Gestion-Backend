@@ -838,7 +838,7 @@ export const eliminarPerdida = async (req, res) => {
 
 export const getDashboardData = async (req, res) => {
     try {
-        // Total fallecidos (víctimas con certificado)
+        // Total víctimas (con cédula válida)
         const victimas = await pool.query(`
             SELECT 
                 COUNT(*) FILTER (WHERE "TTR_CEDULA" IS NOT NULL AND "TTR_CEDULA" != '') AS fallecidos
@@ -855,15 +855,13 @@ export const getDashboardData = async (req, res) => {
             LIMIT 1
         `);
 
-        // Desastres por tipo (cantidad, fallecidos)
+        // Desastres por tipo (cantidad)
         const desastresPorTipo = await pool.query(`
             SELECT 
                 d."TMA_NOMBRE" as tipo,
-                COUNT(a."TTR_COAFEC") as cantidad,
-                COUNT(v."TTR_COVICT") FILTER (WHERE v."TTR_CERTIF" IS NOT NULL AND v."TTR_CERTIF" != '') as fallecidos
+                COUNT(a."TTR_COAFEC") as cantidad
             FROM "BDTTR_AFEC" a
             JOIN "BDTMA_DESA" d ON a."TTR_CODESA" = d."TMA_CODESA"
-            LEFT JOIN "BDTTR_VICT" v ON v."TTR_COAFEC" = a."TTR_COAFEC"
             GROUP BY d."TMA_NOMBRE"
             ORDER BY cantidad DESC
         `);
@@ -876,44 +874,17 @@ export const getDashboardData = async (req, res) => {
             ORDER BY cantidad DESC
         `);
 
-        // Víctimas fatales (como estado adicional)
-        const victimasFatales = await pool.query(`
-            SELECT COUNT(*) as cantidad
-            FROM "BDTTR_VICT"
-            WHERE "TTR_CEDULA" IS NOT NULL AND "TTR_CEDULA" != ''
-        `);
-
-        // Pérdidas por tipo
-        const perdidasPorTipo = await pool.query(`
-            SELECT t."TTR_NOMBRE" as tipo, COUNT(p."TTR_COPERD") as cantidad
-            FROM "BDTTR_PERD" p
-            JOIN "BDTTR_TIPE" t ON p."TTR_COTIPO" = t."TTR_COTIPO"
-            GROUP BY t."TTR_NOMBRE"
-            ORDER BY cantidad DESC
-        `);
-
-        // Unimos damnificados y víctimas fatales para la gráfica
-        const estadosSaludGrafica = [
-            ...estadosSalud.rows.map(r => ({
-                estado: r.estado,
-                cantidad: Number(r.cantidad)
-            })),
-            { estado: 'Fallecidos', cantidad: Number(victimasFatales.rows[0].cantidad) }
-        ];
-
         res.json({
             resumen: {
-                fallecidos: Number(victimas.rows[0].fallecidos),
+                totalVictimas: Number(victimas.rows[0].totalVictimas),
                 desastreMasFrecuente: desastreFrecuente.rows[0]?.TMA_NOMBRE || 'N/A'
             },
             desastresPorTipo: desastresPorTipo.rows.map(r => ({
                 tipo: r.tipo,
-                cantidad: Number(r.cantidad),
-                fallecidos: Number(r.fallecidos)
+                cantidad: Number(r.cantidad)
             })),
-            estadosSalud: estadosSaludGrafica,
-            perdidasPorTipo: perdidasPorTipo.rows.map(r => ({
-                tipo: r.tipo,
+            estadosSalud: estadosSalud.rows.map(r => ({
+                estado: r.estado,
                 cantidad: Number(r.cantidad)
             }))
         });
