@@ -1999,7 +1999,7 @@ export const generarPdfResumenAfectacionesPorFecha = async (req, res) => {
   }
 };
 
-// Listar todos los usuarios con campos relevantes
+// Listar todos los usuarios with campos relevantes
 export const listarUsuarios = async (req, res) => {
   try {
     const result = await pool.query(`
@@ -2197,3 +2197,220 @@ export const eliminarAfectado = async (req, res) => {
     }
 };
 
+
+import { generateReportePDF } from "../pdf/generateReportePDF.js";
+
+/* =========================
+   CREAR REPORTE
+========================= */
+export const crearReporte = async (req, res) => {
+    try {
+        const {
+            fecha,
+            unidad_numero,
+            folio_numero,
+            direccion,
+            hora_inicio_llamada,
+            hora_activacion,
+            hora_en_sitio,
+            hora_culminacion,
+            condicion,
+            observaciones,
+            elaborado_por,
+            cargo,
+            cedula_identidad,
+            tipos_actividad,
+            acciones_tomadas,
+            danos,
+            comision
+        } = req.body;
+
+        const result = await pool.query(`
+            INSERT INTO "RA_REPORTE" (
+                "RA_FECHA","RA_UNIDAD_NUMERO","RA_FOLIO_NUMERO","RA_DIRECCION",
+                "RA_HORA_INICIO","RA_HORA_ACTIVACION","RA_HORA_SITIO","RA_HORA_CULMINACION",
+                "RA_CONDICION","RA_OBSERVACIONES","RA_ELABORADO_POR","RA_CARGO","RA_CEDULA"
+            )
+            VALUES ($1,$2,$3,INITCAP($4),$5,$6,$7,$8,$9,INITCAP($10),INITCAP($11),INITCAP($12),$13)
+            RETURNING "RA_ID"
+        `, [
+            fecha,
+            unidad_numero,
+            folio_numero,
+            direccion,
+            hora_inicio_llamada ? hora_inicio_llamada.slice(0, 5) : null,
+            hora_activacion ? hora_activacion.slice(0, 5) : null,
+            hora_en_sitio ? hora_en_sitio.slice(0, 5) : null,
+            hora_culminacion ? hora_culminacion.slice(0, 5) : null,
+            condicion,
+            observaciones,
+            elaborado_por,
+            cargo,
+            cedula_identidad
+        ]);
+
+        const raId = result.rows[0].RA_ID;
+
+        for (const t of tipos_actividad) {
+            await pool.query(
+                `INSERT INTO "RA_TIPO_ACTIVIDAD" ("RA_ID","TA_NOMBRE") VALUES ($1,$2)`,
+                [raId, t]
+            );
+        }
+
+        for (const a of acciones_tomadas) {
+            await pool.query(
+                `INSERT INTO "RA_ACCION" ("RA_ID","AC_NOMBRE") VALUES ($1,$2)`,
+                [raId, a]
+            );
+        }
+
+        for (const d of danos) {
+            await pool.query(
+                `INSERT INTO "RA_DANO" ("RA_ID","DA_NOMBRE") VALUES ($1,$2)`,
+                [raId, d]
+            );
+        }
+
+        for (const c of comision) {
+            await pool.query(
+                `INSERT INTO "RA_COMISION"
+                ("RA_ID","CO_POSICION","CO_NOMBRE","CO_ORGANISMO")
+                VALUES ($1,$2,INITCAP($3),$4)`,
+                [raId, c.posicion, c.nombre, c.organismo]
+            );
+        }
+
+        res.json({ message: "Reporte creado", id: raId });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Error al crear reporte" });
+    }
+};
+
+/* =========================
+   LISTAR REPORTES
+========================= */
+export const listarReportes = async (req, res) => {
+    const result = await pool.query(
+        `SELECT * FROM "RA_REPORTE" ORDER BY "RA_FECHA_REGISTRO" DESC`
+    );
+    res.json(result.rows);
+};
+
+/* =========================
+   GENERAR PDF
+========================= */
+export const imprimirReporte = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const reporte = await pool.query(
+            `SELECT * FROM "RA_REPORTE" WHERE "RA_ID"=$1`,
+            [id]
+        );
+
+        const tipos = await pool.query(
+            `SELECT "TA_NOMBRE" FROM "RA_TIPO_ACTIVIDAD" WHERE "RA_ID"=$1`,
+            [id]
+        );
+
+        const acciones = await pool.query(
+            `SELECT "AC_NOMBRE" FROM "RA_ACCION" WHERE "RA_ID"=$1`,
+            [id]
+        );
+
+        const danos = await pool.query(
+            `SELECT "DA_NOMBRE" FROM "RA_DANO" WHERE "RA_ID"=$1`,
+            [id]
+        );
+
+        const comision = await pool.query(
+            `SELECT * FROM "RA_COMISION" WHERE "RA_ID"=$1`,
+            [id]
+        );
+
+        const data = {
+            fecha: reporte.rows[0].RA_FECHA,
+            unidad_numero: reporte.rows[0].RA_UNIDAD_NUMERO,
+            folio_numero: reporte.rows[0].RA_FOLIO_NUMERO,
+            direccion: reporte.rows[0].RA_DIRECCION,
+            hora_inicio_llamada: reporte.rows[0].RA_HORA_INICIO ? reporte.rows[0].RA_HORA_INICIO.slice(0, 5) : null,
+            hora_activacion: reporte.rows[0].RA_HORA_ACTIVACION ? reporte.rows[0].RA_HORA_ACTIVACION.slice(0, 5) : null,
+            hora_en_sitio: reporte.rows[0].RA_HORA_SITIO ? reporte.rows[0].RA_HORA_SITIO.slice(0, 5) : null,
+            hora_culminacion: reporte.rows[0].RA_HORA_CULMINACION ? reporte.rows[0].RA_HORA_CULMINACION.slice(0, 5) : null,
+            condicion: reporte.rows[0].RA_CONDICION,
+            observaciones: reporte.rows[0].RA_OBSERVACIONES,
+            elaborado_por: reporte.rows[0].RA_ELABORADO_POR,
+            cargo: reporte.rows[0].RA_CARGO,
+            cedula_identidad: reporte.rows[0].RA_CEDULA,
+            tipos_actividad: tipos.rows.map(r => r.TA_NOMBRE),
+            acciones_tomadas: acciones.rows.map(r => r.AC_NOMBRE),
+            danos: danos.rows.map(r => r.DA_NOMBRE),
+            comision: comision.rows
+        };
+
+        console.log("Datos del reporte:", reporte.rows[0]);
+        console.log("Tipos de actividad:", tipos.rows);
+        console.log("Acciones tomadas:", acciones.rows);
+        console.log("Daños:", danos.rows);
+        console.log("Comisión:", comision.rows);
+
+        console.log("Datos enviados a generateReportePDF:", data);
+        const pdfBytes = await generateReportePDF(data);
+
+        res.setHeader("Content-Type", "application/pdf");
+        res.send(Buffer.from(pdfBytes));
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Error al generar PDF" });
+    }
+};
+
+export const eliminarReporte = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Eliminar registros relacionados primero (por FK)
+        await pool.query(
+            `DELETE FROM "RA_TIPO_ACTIVIDAD" WHERE "RA_ID" = $1`,
+            [id]
+        );
+
+        await pool.query(
+            `DELETE FROM "RA_ACCION" WHERE "RA_ID" = $1`,
+            [id]
+        );
+
+        await pool.query(
+            `DELETE FROM "RA_DANO" WHERE "RA_ID" = $1`,
+            [id]
+        );
+
+        await pool.query(
+            `DELETE FROM "RA_COMISION" WHERE "RA_ID" = $1`,
+            [id]
+        );
+
+        // Eliminar reporte principal
+        const result = await pool.query(
+            `DELETE FROM "RA_REPORTE" WHERE "RA_ID" = $1 RETURNING *`,
+            [id]
+        );
+
+        if (result.rowCount === 0) {
+            return res.status(404).json({ message: "Reporte no encontrado" });
+        }
+
+        res.json({
+            message: "Reporte eliminado correctamente",
+            reporte: result.rows[0]
+        });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Error al eliminar reporte" });
+    }
+};
