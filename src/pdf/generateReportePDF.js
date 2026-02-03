@@ -277,7 +277,7 @@ roles.forEach((r, i) => {
 
   p2.drawText(wrappedText, {
     x: M + 10,
-    y: y2 - 50, // Adjusted y-coordinate to ensure text starts lower
+    y: y2 - 50, // Adjusteded y-coordinate to ensure text starts lower
     size: 9,
     font,
     maxWidth: 532,     // 552 - 20
