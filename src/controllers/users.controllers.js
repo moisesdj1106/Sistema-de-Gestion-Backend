@@ -2030,13 +2030,13 @@ export const editarUsuario = async (req, res) => {
 
     const result = await pool.query(
       `UPDATE "BDTMA_USUA"
-       SET "TMA_NOMBRE" = $1,
-           "TMA_APELLI" = $2,
+       SET "TMA_NOMBRE" = INITCAP($1),
+           "TMA_APELLI" = INITCAP($2),
            "TMA_DIRECC" = $3,
            "TMA_TELEFO" = $4,
            "TMA_CORREO" = $5,
            "TMA_USUARI" = $6,
-           "TMA_ROLE" = $7
+           "TMA_ROLE" = LOWER($7)
        WHERE "TMA_CEDULA" = $8
        RETURNING *`,
       [nombres, apellidos, direccion, telefono, correo, usuario, rol, cedula]
